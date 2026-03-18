@@ -16,8 +16,12 @@ except ImportError:
 
 import numpy as np
 import torch
+import flax.traverse_util
+import jax
 
 from openpi.models.pi0 import pi0_config  # Pi0Config lives in pi0_config submodule
+from openpi.models import model as _model
+from openpi.shared import download
 import openpi.transforms as transforms
 from openpi.training import config as _cfg
 from openpi.training import weight_loaders
@@ -26,6 +30,50 @@ from openpi.training.config import (
     DataConfigFactory,
     ModelTransformFactory,
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class PartialCheckpointWeightLoader(weight_loaders.WeightLoader):
+    """Like CheckpointWeightLoader but skips params with shape mismatches.
+
+    Useful when fine-tuning from a checkpoint trained with a different action_dim.
+    Shape-mismatched params (e.g. action_in_proj) are kept at random initialization.
+    """
+
+    params_path: str
+
+    def load(self, params: weight_loaders.at.Params) -> weight_loaders.at.Params:
+        loaded = _model.restore_params(
+            download.maybe_download(self.params_path), restore_type=np.ndarray
+        )
+        flat_ref = flax.traverse_util.flatten_dict(params, sep="/")
+        flat_loaded = flax.traverse_util.flatten_dict(loaded, sep="/")
+
+        result = {}
+        skipped = []
+        for k, v in flat_loaded.items():
+            if k not in flat_ref:
+                continue
+            ref = flat_ref[k]
+            ref_shape = ref.shape if hasattr(ref, "shape") else tuple()
+            if hasattr(v, "shape") and v.shape != ref_shape:
+                skipped.append(f"  {k}: ckpt {v.shape} != model {ref_shape}")
+                continue
+            result[k] = v.astype(ref.dtype) if hasattr(v, "dtype") and v.dtype != ref.dtype else v
+
+        # Fill missing LoRA weights from model init
+        import re
+        lora_pattern = re.compile(".*lora.*")
+        for k in flat_ref:
+            if lora_pattern.fullmatch(k) and k not in result:
+                result[k] = flat_ref[k]
+
+        if skipped:
+            print(f"[PartialCheckpointWeightLoader] Skipped {len(skipped)} mismatched params:")
+            for s in skipped:
+                print(s)
+
+        return flax.traverse_util.unflatten_dict(result, sep="/")
 
 @dataclasses.dataclass(frozen=True)
 class TensorImagesToNumpy(transforms.DataTransformFn):
@@ -128,8 +176,8 @@ _PICKCUBE_CONFIG = _cfg.TrainConfig(
             asset_id=ASSET_ID,
         ),
     ),
-    # Load pretrained pi0 base weights
-    weight_loader=weight_loaders.CheckpointWeightLoader(PRETRAINED_PARAMS),
+    # Load pretrained weights; skip action layers with different action_dim
+    weight_loader=PartialCheckpointWeightLoader(PRETRAINED_PARAMS),
     # LoRA freeze: only train LoRA adapters
     freeze_filter=pi0_config.Pi0Config(
         paligemma_variant="gemma_2b_lora",
