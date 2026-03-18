@@ -90,6 +90,7 @@ class PickCubeDataConfig(DataConfigFactory):
 
 _PICKCUBE_CONFIG = _cfg.TrainConfig(
     name="pi0_pickcube_lora",
+    exp_name="lora_ft_v1",
     # LoRA fine-tuning of pi0 base
     model=pi0_config.Pi0Config(
         paligemma_variant="gemma_2b_lora",
