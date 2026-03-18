@@ -54,7 +54,7 @@ ASSET_ID           = "pickcube"                # sub-dir under assets_dir
 CHECKPOINT_BASE    = "/opt/checkpoints"
 # Use local pi0_libero_low_mem_finetune checkpoint as starting point
 # (avoids GCS auth issues; same LoRA architecture gemma_2b_lora + gemma_300m_lora)
-PRETRAINED_PARAMS  = "/opt/checkpoints/pi0_libero_low_mem_finetune/libero_ft/29999"
+PRETRAINED_PARAMS  = "/opt/checkpoints/pi0_libero_low_mem_finetune/libero_ft/29999/params"
 
 PROMPT = "pick up the red cube"
 
