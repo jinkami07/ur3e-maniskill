@@ -68,7 +68,10 @@ RUN pip install \
         Pillow \
         opencv-python-headless
 
-# ── 5b. pinocchio (EEF delta 制御の IK に必要) ───────────────────────────────
+# ── 5b. scipy pin (mplib==0.1.1 は scipy<1.14 が必要) ───────────────────────
+RUN pip install "scipy>=1.11,<1.14"
+
+# ── 5c. pinocchio (EEF delta 制御の IK に必要) ───────────────────────────────
 RUN conda install -n pi0 -c conda-forge pinocchio -y
 
 # ── 6. UR3e URDF (arm only, from ros-industrial/universal_robot) ──────────────
