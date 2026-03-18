@@ -80,12 +80,13 @@ else
     docker run --rm \
         --runtime=nvidia \
         -e NVIDIA_VISIBLE_DEVICES=all \
+        --entrypoint /opt/conda/envs/pi0/bin/python \
         -v /opt/pickcube_demos:/opt/pickcube_demos \
         -v /opt:/opt \
         -v "$(pwd)/scripts:/workspace/scripts" \
         -w /workspace \
         "$DOCKER_IMAGE" \
-        python scripts/convert_demos_to_lerobot.py \
+        scripts/convert_demos_to_lerobot.py \
             --demos "$DEMOS_H5" \
             --out "$LEROBOT_DIR" \
             --repo-id pickcube_lerobot_v2 \
@@ -114,8 +115,9 @@ docker run --rm \
     -v /tmp/train_output:/workspace/output \
     -w /workspace \
     --shm-size=4g \
+    --entrypoint /opt/conda/envs/pi0/bin/python \
     "$DOCKER_IMAGE" \
-    python scripts/train_pickcube.py \
+    scripts/train_pickcube.py \
     2>&1 | tee "$LOG_DIR/train.log"
 
 TRAIN_EXIT="${PIPESTATUS[0]}"
