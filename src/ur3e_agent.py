@@ -87,6 +87,10 @@ class UR3e(BaseAgent):
     def finger2_link(self):
         return self.robot.links_map["right_finger_link"]
 
+    def is_static(self, threshold: float = 0.2):
+        qvel = self.robot.get_qvel()[..., :-2]  # exclude finger joints
+        return torch.max(torch.abs(qvel), 1)[0] <= threshold
+
     def is_grasping(self, object: Union[Actor, None] = None, min_force: float = 0.5, max_angle: float = 85):
         l_contact_forces = self.scene.get_pairwise_contact_forces(self.finger1_link, object)
         r_contact_forces = self.scene.get_pairwise_contact_forces(self.finger2_link, object)
