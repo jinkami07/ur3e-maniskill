@@ -9,7 +9,10 @@ train_pickcube.py から import して使用する。
 from __future__ import annotations
 
 import dataclasses
-from typing import override
+try:
+    from typing import override          # Python 3.12+
+except ImportError:
+    from typing_extensions import override  # Python 3.11 fallback
 
 import openpi.models.pi0 as pi0_config
 import openpi.transforms as transforms
