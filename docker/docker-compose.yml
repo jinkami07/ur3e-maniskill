@@ -11,7 +11,9 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all
       - MANI_SKILL_RENDER_BACKEND=egl
       - XLA_PYTHON_CLIENT_PREALLOCATE=false
-      - XLA_PYTHON_CLIENT_MEM_FRACTION=0.6
+      - XLA_PYTHON_CLIENT_MEM_FRACTION=0.85
+      # wandb
+      - WANDB_API_KEY=${WANDB_API_KEY:-}
       # eval パラメータ（上書き可）
       - CKPT_DIR=${CKPT_DIR:-}
       - NUM_EPISODES=${NUM_EPISODES:-5}
@@ -23,11 +25,15 @@ services:
     volumes:
       # スクリプトをマウント（コンテナ再ビルド不要で編集可）
       - ../src:/workspace/src
+      - ../scripts:/workspace/scripts
       # チェックポイントをホストに永続化
-      - /opt/checkpoints:/opt/openpi/checkpoints
+      - /opt/openpi/checkpoints:/opt/openpi/checkpoints
+      # デモデータ + LeRobot データセット
+      - /opt/pickcube_demos:/opt/pickcube_demos
+      - /opt/pickcube_lerobot:/opt/pickcube_lerobot
       # 動画・ログ出力
       - /tmp/eval_output:/workspace/output
     working_dir: /workspace
-    shm_size: "2g"
+    shm_size: "4g"
     stdin_open: false
     tty: false
