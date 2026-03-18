@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import os
 from copy import deepcopy
+from typing import Union
 
 import numpy as np
 import sapien
+import torch
 
 from mani_skill.agents.base_agent import BaseAgent, Keyframe
 from mani_skill.agents.controllers.pd_ee_pose import (
@@ -27,6 +29,8 @@ from mani_skill.agents.controllers.pd_joint_pos import (
     PDJointPosMimicControllerConfig,
 )
 from mani_skill.agents.registration import register_agent
+from mani_skill.utils import common
+from mani_skill.utils.structs.actor import Actor
 
 # ── URDF path ─────────────────────────────────────────────────────────────────
 _DEFAULT_URDF = "/opt/ur3e/ur3e_with_gripper.urdf"
@@ -53,11 +57,12 @@ class UR3e(BaseAgent):
     urdf_path: str = UR3E_URDF
 
     # Home position: arm upright, gripper open
+    # qpos: [6 arm joints, left_finger, right_finger]
     keyframes = dict(
         rest=Keyframe(
             pose=sapien.Pose(p=[0, 0, 0]),
             qpos=np.array(
-                [0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0, 0.04],
+                [0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0, 0.04, 0.04],
                 dtype=np.float32,
             ),
         )
@@ -73,6 +78,28 @@ class UR3e(BaseAgent):
     gripper_force_limit: float = 20.0
 
     ee_link_name: str = TCP_LINK
+
+    @property
+    def finger1_link(self):
+        return self.robot.links_map["left_finger_link"]
+
+    @property
+    def finger2_link(self):
+        return self.robot.links_map["right_finger_link"]
+
+    def is_grasping(self, object: Union[Actor, None] = None, min_force: float = 0.5, max_angle: float = 85):
+        l_contact_forces = self.scene.get_pairwise_contact_forces(self.finger1_link, object)
+        r_contact_forces = self.scene.get_pairwise_contact_forces(self.finger2_link, object)
+        lforce = torch.linalg.norm(l_contact_forces, axis=1)
+        rforce = torch.linalg.norm(r_contact_forces, axis=1)
+        # fingers open along X axis in local frame
+        ldirection = self.finger1_link.pose.to_transformation_matrix()[..., :3, 0]
+        rdirection = -self.finger2_link.pose.to_transformation_matrix()[..., :3, 0]
+        langle = common.compute_angle_between(ldirection, l_contact_forces)
+        rangle = common.compute_angle_between(rdirection, r_contact_forces)
+        lflag = torch.logical_and(lforce >= min_force, torch.rad2deg(langle) <= max_angle)
+        rflag = torch.logical_and(rforce >= min_force, torch.rad2deg(rangle) <= max_angle)
+        return torch.logical_and(lflag, rflag)
 
     @property
     def _controller_configs(self) -> dict:
