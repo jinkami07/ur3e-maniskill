@@ -19,6 +19,7 @@ services:
       - HORIZON=${HORIZON:-10}
       - CAMERA_HEIGHT=224
       - CAMERA_WIDTH=224
+      - OPENPI_CONF=${OPENPI_CONF:-pi0_libero_low_mem_finetune}
     volumes:
       # スクリプトをマウント（コンテナ再ビルド不要で編集可）
       - ../src:/workspace/src
@@ -28,5 +29,5 @@ services:
       - /tmp/eval_output:/workspace/output
     working_dir: /workspace
     shm_size: "2g"
-    stdin_open: true
-    tty: true
+    stdin_open: false
+    tty: false
