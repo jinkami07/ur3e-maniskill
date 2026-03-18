@@ -103,6 +103,7 @@ docker run --rm \
     -e XLA_PYTHON_CLIENT_PREALLOCATE=false \
     -e XLA_PYTHON_CLIENT_MEM_FRACTION=0.85 \
     -e WANDB_API_KEY="$WANDB_API_KEY" \
+    -e WANDB_MODE=offline \
     -v /opt/pickcube_lerobot:/opt/pickcube_lerobot \
     -v /opt/openpi/checkpoints:/opt/openpi/checkpoints \
     -v "$(pwd)/scripts:/workspace/scripts" \
