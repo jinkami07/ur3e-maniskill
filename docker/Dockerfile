@@ -79,7 +79,7 @@ RUN conda install -n pi0 -c conda-forge pinocchio -y
 
 # ── 6. UR3e URDF (arm only, from ros-industrial/universal_robot) ──────────────
 WORKDIR /opt
-RUN git clone --depth 1 -b noetic-devel \
+RUN git clone --depth 1 -b melodic-devel \
         https://github.com/ros-industrial/universal_robot.git /opt/universal_robot
 
 # Process xacro → URDF, fix package:// paths, append simple parallel gripper

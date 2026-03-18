@@ -1,8 +1,8 @@
 """
 UR3e URDF 生成スクリプト（Dockerfile から呼ばれる）
 
-1. xacro で UR3e アーム URDF を生成
-2. package:// パスを絶対パスに置換
+1. ur_description/urdf/ の xacro ファイル中の $(find ur_description) を絶対パスに置換
+2. xacro で UR3e アーム URDF を生成
 3. シンプルな並列グリッパー定義を末尾に追加
 4. /opt/ur3e/ur3e_with_gripper.urdf に保存
 """
@@ -15,7 +15,18 @@ UR_DESC_ROOT = Path("/opt/universal_robot/ur_description")
 OUT_DIR = Path("/opt/ur3e")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# ── 1. xacro で UR3e アームを生成 ────────────────────────────────────────────
+# ── 1. $(find ur_description) → 絶対パスに置換 ───────────────────────────────
+#  melodic-devel ブランチの xacro は ROS1 マクロを使うため、
+#  スタンドアロン実行用にパスを事前にパッチする
+print("[info] Patching $(find ur_description) in xacro files ...")
+for xacro_file in UR_DESC_ROOT.rglob("*.xacro"):
+    content = xacro_file.read_text(errors="replace")
+    patched = content.replace("$(find ur_description)", str(UR_DESC_ROOT))
+    if patched != content:
+        xacro_file.write_text(patched)
+        print(f"  patched: {xacro_file.relative_to(UR_DESC_ROOT)}")
+
+# ── 2. xacro で UR3e アームを生成 ────────────────────────────────────────────
 xacro_candidates = [
     UR_DESC_ROOT / "urdf" / "ur3e.xacro",
     UR_DESC_ROOT / "urdf" / "ur3e.urdf.xacro",
@@ -29,7 +40,9 @@ for c in xacro_candidates:
         break
 
 if xacro_file is None:
-    print(f"[ERROR] UR3e xacro not found. Searched:\n" + "\n".join(str(c) for c in xacro_candidates))
+    print("[ERROR] UR3e xacro not found. Searched:")
+    for c in xacro_candidates:
+        print(f"  {c}")
     print("Available files in urdf/:")
     for f in (UR_DESC_ROOT / "urdf").iterdir():
         print(f"  {f.name}")
@@ -48,19 +61,7 @@ if result.returncode != 0:
 
 arm_urdf = result.stdout
 
-# ── 2. package:// → 絶対パス ─────────────────────────────────────────────────
-arm_urdf = arm_urdf.replace(
-    "package://ur_description/",
-    str(UR_DESC_ROOT) + "/",
-)
-
 # ── 3. シンプルな並列グリッパー追加 ──────────────────────────────────────────
-#  UR3e の tool0 リンクにアタッチ
-#  - gripper_base_link (固定)
-#  - left_finger_link  (prismatic)
-#  - right_finger_link (prismatic, mimic)
-#  TCP は gripper_tcp_link
-
 GRIPPER_URDF = """
   <!-- ========================================================== -->
   <!-- Simple parallel gripper attached at tool0                  -->
@@ -160,9 +161,9 @@ print(f"[OK] UR3e URDF written: {out_path}")
 try:
     import yourdfpy
     robot = yourdfpy.URDF.load(str(out_path))
-    joints = [j for j in robot.joint_map.keys()]
-    print(f"[OK] URDF loaded OK. Joints ({len(joints)}): {joints}")
+    joints = list(robot.joint_map.keys())
+    print(f"[OK] URDF validated. Joints ({len(joints)}): {joints}")
 except ImportError:
-    print("[skip] yourdfpy not installed, skipping URDF validation")
+    print("[skip] yourdfpy not installed, skipping validation")
 except Exception as e:
-    print(f"[WARN] URDF validation failed: {e}")
+    print(f"[WARN] URDF validation: {e}")
