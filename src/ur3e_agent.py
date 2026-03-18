@@ -41,7 +41,7 @@ ARM_JOINTS = [
     "wrist_2_joint",
     "wrist_3_joint",
 ]
-GRIPPER_JOINTS = ["left_finger_joint"]  # right_finger_joint is mimic
+GRIPPER_JOINTS = ["left_finger_joint", "right_finger_joint"]  # right_finger mimics left
 TCP_LINK = "gripper_tcp_link"           # frame between fingertips
 
 
@@ -114,6 +114,7 @@ class UR3e(BaseAgent):
         )
 
         # ── Gripper: joint position (mimic) ───────────────────────────────────
+        # mimic dict: right_finger follows left_finger (multiplier=1.0)
         gripper_pd_joint_pos = PDJointPosMimicControllerConfig(
             joint_names=GRIPPER_JOINTS,
             lower=0.0,   # fully closed
@@ -122,6 +123,7 @@ class UR3e(BaseAgent):
             damping=self.gripper_damping,
             force_limit=self.gripper_force_limit,
             normalize_action=True,
+            mimic={"right_finger_joint": {"joint": "left_finger_joint", "multiplier": 1.0, "offset": 0.0}},
         )
 
         return dict(
