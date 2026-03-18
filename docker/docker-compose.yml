@@ -1,0 +1,32 @@
+services:
+  sandbox:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      platforms:
+        - linux/amd64
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - MANI_SKILL_RENDER_BACKEND=egl
+      - XLA_PYTHON_CLIENT_PREALLOCATE=false
+      - XLA_PYTHON_CLIENT_MEM_FRACTION=0.6
+      # eval パラメータ（上書き可）
+      - CKPT_DIR=${CKPT_DIR:-}
+      - NUM_EPISODES=${NUM_EPISODES:-5}
+      - TOTAL_STEPS=${TOTAL_STEPS:-200}
+      - HORIZON=${HORIZON:-10}
+      - CAMERA_HEIGHT=224
+      - CAMERA_WIDTH=224
+    volumes:
+      # スクリプトをマウント（コンテナ再ビルド不要で編集可）
+      - ../src:/workspace/src
+      # チェックポイントをホストに永続化
+      - /opt/checkpoints:/opt/openpi/checkpoints
+      # 動画・ログ出力
+      - /tmp/eval_output:/workspace/output
+    working_dir: /workspace
+    shm_size: "2g"
+    stdin_open: true
+    tty: true
