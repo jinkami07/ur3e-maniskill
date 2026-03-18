@@ -1,334 +1,206 @@
 """
-PickCube-v1 デモ収集スクリプト
-Panda の Motion Planning ソルバーでデモを生成し、
-RGB観測 + TCP pose + グリッパー幅 + delta EEF action を HDF5 に保存する。
+PickCube-v1 デモ収集スクリプト (スクリプテッドポリシー版)
+
+mplib/pinocchio を一切使わず、フェーズベースの EEF delta ポリシーで
+成功エピソードを収集し HDF5 に保存する。
+
+フェーズ:
+  0: キューブ真上へ移動 (gripper open)
+  1: キューブ高さへ降下 (gripper open)
+  2: グリッパー閉じる (is_grasped まで待つ)
+  3: goal_pos まで持ち上げる (gripper close)
 
 Usage (inside container):
   python scripts/collect_pickcube_demos.py --num-demos 500 --out /opt/pickcube_demos/demos.h5
 """
-from __future__ import annotations
-
 import argparse
-import sys
 from pathlib import Path
 
 import gymnasium as gym
 import h5py
-import mani_skill.envs  # noqa: F401 – task registration
+import mani_skill.envs  # noqa: F401  – task registration
 import numpy as np
-import sapien
 import torch
-from mani_skill.examples.motionplanning.panda.solutions.pick_cube import solve
-from mani_skill.utils.wrappers.record import RecordEpisode
 
 # ── Args ──────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
-parser.add_argument("--num-demos", type=int, default=500)
-parser.add_argument("--out", type=str, default="/opt/pickcube_demos/demos.h5")
-parser.add_argument("--cam-size", type=int, default=224)
+parser.add_argument("--num-demos",  type=int, default=500)
+parser.add_argument("--out",        type=str, default="/opt/pickcube_demos/demos.h5")
+parser.add_argument("--cam-size",   type=int, default=224)
 parser.add_argument("--seed-start", type=int, default=0)
+parser.add_argument("--max-steps",  type=int, default=300)
 args = parser.parse_args()
 
 OUT_PATH = Path(args.out)
 OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 CAM = args.cam_size
 
-# ── Env ───────────────────────────────────────────────────────────────────────
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _np(t):
+    if isinstance(t, torch.Tensor):
+        return t.detach().cpu().numpy()
+    return np.asarray(t)
+
+
+_SCALE = 10.0  # pd_ee_delta_pose: action=1.0 ≈ 0.1m delta (normalize to [-1,1])
+
+
+def _delta_action(tcp_pos, target_pos, gripper):
+    """
+    Return 7-dim pd_ee_delta_pose action (normalized to [-1, 1]).
+    _SCALE converts metres to normalized units: 1.0m * _SCALE → clipped to 1.0.
+    tcp_pos: (3,) current EEF xyz
+    target_pos: (3,) target xyz
+    gripper: float scalar (1=open, -1=close, normalized)
+    """
+    delta = np.clip(_SCALE * (target_pos - tcp_pos), -1.0, 1.0)
+    return np.concatenate([delta, np.zeros(3), [gripper]]).astype(np.float32)
+
+
+# ── Episode collection ────────────────────────────────────────────────────────
+
+def collect_episode(env, seed):
+    """
+    Run one episode of PickCube-v1 with phase-based scripted policy.
+    Returns data dict on success, None on failure.
+    """
+    obs, _ = env.reset(seed=seed)
+    env_u = env.unwrapped
+
+    fronts, wrists, states, acts = [], [], [], []
+
+    phase = 0
+    phase_timer = 0
+    OPEN, CLOSE = 1.0, -1.0
+
+    for step in range(args.max_steps):
+        # ── Extract observation ──────────────────────────────────────────────
+        sd = obs["sensor_data"]
+        front = _np(sd["base_camera"]["rgb"])[0].astype(np.uint8)
+        if "hand_camera" in sd:
+            wrist = _np(sd["hand_camera"]["rgb"])[0].astype(np.uint8)
+        else:
+            wrist = front.copy()
+
+        tcp7   = _np(obs["extra"]["tcp_pose"])[0].astype(np.float32)   # (7,) pos+quat
+        qpos   = _np(obs["agent"]["qpos"])[0].astype(np.float32)       # (9,)
+        gripper_w = qpos[-2:].mean().astype(np.float32)
+        state  = np.concatenate([tcp7, [gripper_w]])                    # (8,)
+
+        tcp_pos    = tcp7[:3]
+        cube_pos   = _np(env_u.cube.pose.p)[0]
+        goal_pos   = _np(env_u.goal_site.pose.p)[0]
+        is_grasped = bool(_np(obs["extra"]["is_grasped"]).flat[0])
+
+        # ── Phase logic ──────────────────────────────────────────────────────
+        if phase == 0:
+            # Move above cube with gripper open
+            above = cube_pos + np.array([0.0, 0.0, 0.20])
+            action = _delta_action(tcp_pos, above, OPEN)
+            xy_dist = np.linalg.norm(tcp_pos[:2] - cube_pos[:2])
+            if tcp_pos[2] > cube_pos[2] + 0.15 and xy_dist < 0.04:
+                phase = 1
+
+        elif phase == 1:
+            # Descend onto cube (grasp height ≈ cube centre)
+            grasp_target = cube_pos + np.array([0.0, 0.0, 0.01])
+            action = _delta_action(tcp_pos, grasp_target, OPEN)
+            dist = np.linalg.norm(tcp_pos - grasp_target)
+            if dist < 0.015:
+                phase = 2
+                phase_timer = 0
+
+        elif phase == 2:
+            # Close gripper, hold position
+            grasp_target = cube_pos + np.array([0.0, 0.0, 0.01])
+            action = _delta_action(tcp_pos, grasp_target, CLOSE)
+            phase_timer += 1
+            if is_grasped or phase_timer >= 20:
+                phase = 3
+
+        else:
+            # Lift to goal
+            action = _delta_action(tcp_pos, goal_pos, CLOSE)
+
+        # Record (obs BEFORE step)
+        fronts.append(front)
+        wrists.append(wrist)
+        states.append(state)
+        acts.append(action)
+
+        obs, _, terminated, truncated, info = env.step(action)
+        if terminated or truncated:
+            break
+
+    success = bool(_np(info.get("success", False)).flat[0]
+                   if hasattr(info.get("success", False), "shape")
+                   else info.get("success", False))
+
+    if not success or len(fronts) < 10:
+        return None
+
+    T = len(fronts)
+    return {
+        "front_rgb": np.stack(fronts).astype(np.uint8),    # (T, H, W, 3)
+        "wrist_rgb": np.stack(wrists).astype(np.uint8),
+        "state":     np.stack(states).astype(np.float32),  # (T, 8)
+        "action":    np.stack(acts).astype(np.float32),    # (T, 7)
+    }
+
+
+# ── Main collection loop ──────────────────────────────────────────────────────
+
 env = gym.make(
     "PickCube-v1",
     obs_mode="rgbd",
     robot_uids="panda",
-    control_mode="pd_ee_delta_pose",   # we need EEF delta actions
+    control_mode="pd_ee_delta_pose",
     sensor_configs={"width": CAM, "height": CAM},
     render_mode=None,
 )
 
-
-def _to_np(t):
-    if isinstance(t, torch.Tensor):
-        return t.cpu().numpy()
-    return np.asarray(t)
-
-
-def collect_episode(seed: int):
-    """
-    Returns dict of arrays for one successful episode, or None on failure.
-    Arrays: front_rgb (T,H,W,3), wrist_rgb (T,H,W,3),
-            state (T,8), actions (T,7), success bool.
-    """
-    obs, _ = env.reset(seed=seed)
-
-    # ── Reset env in pd_joint_pos mode first, then re-init with pd_ee_delta_pose
-    # Actually we keep pd_ee_delta_pose throughout. Motion planner generates
-    # joint-space trajectories internally but we capture EEF observations.
-    front_rgbs, wrist_rgbs, states, actions = [], [], [], []
-    last_tcp_pose = None
-
-    def _obs_snapshot(o):
-        """Extract front RGB, state (eef_pos+quat+gripper)."""
-        sd = o["sensor_data"]
-        front = _to_np(sd["base_camera"]["rgb"])[0]  # (H,W,3) uint8
-
-        # wrist camera if available, else copy front
-        if "hand_camera" in sd:
-            wrist = _to_np(sd["hand_camera"]["rgb"])[0]
-        else:
-            wrist = front.copy()
-
-        tcp = _to_np(o["extra"]["tcp_pose"])[0]         # (7,) pos+quat
-        qpos = _to_np(o["agent"]["qpos"])[0]            # (9,) for panda
-        gripper_width = qpos[-2:].mean().reshape(1)     # avg finger width → (1,)
-        state = np.concatenate([tcp, gripper_width]).astype(np.float32)  # (8,)
-        return front, wrist, state, tcp
-
-    # --- run motion planner (uses pd_joint_pos internally) ---
-    # We use a temporary env in pd_joint_pos for planning, then replay in pd_ee_delta_pose
-    # Simplest approach: create a separate planning env
-    plan_env = gym.make(
-        "PickCube-v1",
-        obs_mode="none",
-        robot_uids="panda",
-        control_mode="pd_joint_pos",
-        render_mode=None,
-    )
-    plan_env.reset(seed=seed)
-    try:
-        res = solve(plan_env, seed=seed, debug=False, vis=False)
-    except Exception as e:
-        plan_env.close()
-        return None
-    plan_env.close()
-
-    if res is None or res == -1:
-        return None
-    # res is list of (obs, reward, terminated, truncated, info) tuples
-    # Just check last step success
-    if not res[-1][-1].get("success", False):
-        return None
-
-    # --- Now replay with pd_ee_delta_pose to get EEF observations ---
-    obs, _ = env.reset(seed=seed)
-    f0, w0, s0, tcp0 = _obs_snapshot(obs)
-
-    for step_result in res:
-        # step_result = (obs_plan, reward, term, trunc, info)
-        # We don't use the planned action directly; instead we derive delta EEF from TCP
-        # by stepping the env with zeros and reading TCP, then computing delta
-        # Since motion planner uses pd_joint_pos, we replay the joint positions
-        # Here we take a simpler approach: just step with zero action and use TCP diff
-        # Actually: use the motion planner's joint actions to replicate movement,
-        # then compute EEF delta from consecutive TCP poses.
-        break  # This approach is too complex; use direct obs collection below
-
-    # ── Simpler approach: replay with pd_ee_delta_pose using computed deltas ──
-    # Reset both envs with same seed and step the planning env, recording TCP.
-    plan_env2 = gym.make(
-        "PickCube-v1",
-        obs_mode="rgbd",
-        robot_uids="panda",
-        control_mode="pd_joint_pos",
-        sensor_configs={"width": CAM, "height": CAM},
-        render_mode=None,
-    )
-    obs_p, _ = plan_env2.reset(seed=seed)
-    try:
-        res2 = solve(plan_env2, seed=seed, debug=False, vis=False)
-    except Exception:
-        plan_env2.close()
-        return None
-    plan_env2.close()
-
-    if res2 is None or res2 == -1:
-        return None
-
-    # res2 is list of step results; we need to rebuild the full trajectory
-    # Actually solve() returns only the last step result. We need to collect per-step.
-    # Let's use a wrapper approach instead.
-    return None  # Will be replaced by the wrapper approach below
-
-
-# ── Better approach: monkey-patch the env to record steps ─────────────────────
-
-class StepRecorder:
-    """Wraps gym env to record observations and EEF deltas at each step."""
-
-    def __init__(self, cam_size: int):
-        self.env = gym.make(
-            "PickCube-v1",
-            obs_mode="rgbd",
-            robot_uids="panda",
-            control_mode="pd_joint_pos",
-            sensor_configs={"width": cam_size, "height": cam_size},
-            render_mode=None,
-        )
-        self.reset_episode()
-
-    def reset_episode(self):
-        self._front, self._wrist, self._states = [], [], []
-        self._tcp_poses: list[np.ndarray] = []
-
-    def reset(self, seed):
-        obs, info = self.env.reset(seed=seed)
-        self.reset_episode()
-        self._record_obs(obs)
-        return obs, info
-
-    def step(self, action):
-        out = self.env.step(action)
-        self._record_obs(out[0])
-        return out
-
-    def _record_obs(self, obs):
-        sd = obs["sensor_data"]
-        front = _to_np(sd["base_camera"]["rgb"])[0].astype(np.uint8)
-        if "hand_camera" in sd:
-            wrist = _to_np(sd["hand_camera"]["rgb"])[0].astype(np.uint8)
-        else:
-            wrist = front.copy()
-
-        tcp = _to_np(obs["extra"]["tcp_pose"])[0].astype(np.float32)  # (7,)
-        qpos = _to_np(obs["agent"]["qpos"])[0].astype(np.float32)
-        gripper = np.array([qpos[-2:].mean()], dtype=np.float32)
-        state = np.concatenate([tcp, gripper])  # (8,)
-
-        self._front.append(front)
-        self._wrist.append(wrist)
-        self._states.append(state)
-        self._tcp_poses.append(tcp)
-
-    def get_episode_data(self):
-        """Compute delta EEF actions from consecutive TCP poses."""
-        T = len(self._front)
-        if T < 2:
-            return None
-
-        fronts = np.stack(self._front[:-1])    # (T-1, H, W, 3)
-        wrists = np.stack(self._wrist[:-1])    # (T-1, H, W, 3)
-        states = np.stack(self._states[:-1])   # (T-1, 8)
-
-        # Delta EEF: pos diff + rotation diff (axis-angle approx) + gripper
-        acts = []
-        for t in range(T - 1):
-            curr = self._tcp_poses[t]
-            nxt = self._tcp_poses[t + 1]
-            delta_pos = (nxt[:3] - curr[:3]).astype(np.float32)
-
-            # Rotation delta as axis-angle (simplified: small angle approx → quat diff)
-            # For pi0, we just use delta pos + gripper (3+1=4 dim is also valid)
-            # but pi0 expects 7-dim, so we include rotation delta as euler
-            from scipy.spatial.transform import Rotation as R
-            q_curr = curr[3:7]  # wxyz
-            q_nxt = nxt[3:7]
-            # Convert to scipy convention (xyzw)
-            r_curr = R.from_quat([q_curr[1], q_curr[2], q_curr[3], q_curr[0]])
-            r_nxt = R.from_quat([q_nxt[1], q_nxt[2], q_nxt[3], q_nxt[0]])
-            r_delta = r_nxt * r_curr.inv()
-            euler_delta = r_delta.as_euler("xyz").astype(np.float32)  # (3,)
-
-            # Gripper: use next state's gripper width (normalized to [0,1])
-            gripper_nxt = self._states[t + 1][-1]
-            # Panda max finger width ≈ 0.04 m per finger
-            gripper_norm = np.clip(gripper_nxt / 0.04, 0.0, 1.0).astype(np.float32)
-
-            action = np.concatenate([delta_pos, euler_delta, [gripper_norm]])  # (7,)
-            acts.append(action)
-
-        actions = np.stack(acts).astype(np.float32)  # (T-1, 7)
-        return {
-            "front_rgb": fronts,
-            "wrist_rgb": wrists,
-            "state": states,
-            "action": actions,
-        }
-
-    def close(self):
-        self.env.close()
-
-    @property
-    def unwrapped(self):
-        return self.env.unwrapped
-
-
-# Monkey-patch solve to use our recorder
-from mani_skill.examples.motionplanning.panda.solutions.pick_cube import solve as _orig_solve
-
-
-def solve_and_record(recorder: StepRecorder, seed: int):
-    """Run motion planning solution and record all steps."""
-
-    # Patch the recorder's env step to intercept
-    env_inner = recorder.env
-    orig_step = env_inner.step
-
-    def patched_step(action):
-        obs, rew, term, trunc, info = orig_step(action)
-        recorder._record_obs(obs)
-        return obs, rew, term, trunc, info
-
-    # Override env step inside planner by using unwrapped env directly
-    # We'll use a different approach: run the planner with our env directly
-    planner_env = recorder.env  # planner will call env.reset() and env.step()
-    recorder.reset_episode()
-    obs, _ = planner_env.reset(seed=seed)
-    recorder._record_obs(obs)
-
-    # Temporarily override step
-    planner_env.step = patched_step
-    try:
-        res = _orig_solve(planner_env, seed=seed, debug=False, vis=False)
-    except Exception as e:
-        planner_env.step = orig_step
-        return None
-    planner_env.step = orig_step
-
-    if res is None or res == -1:
-        return None
-    last_info = res[-1][-1] if isinstance(res, list) else res[-1]
-    if not bool(last_info.get("success", False)):
-        return None
-    return recorder.get_episode_data()
-
-
-# ── Main collection loop ────────────────────────────────────────────────────────
-
-env.close()  # close the initial test env
-
-recorder = StepRecorder(CAM)
-print(f"[collect] Collecting {args.num_demos} demos → {OUT_PATH}")
+print(f"[collect] Collecting {args.num_demos} demos → {OUT_PATH}", flush=True)
 
 successes = 0
-failures = 0
-all_episodes = []
+failures  = 0
+MAX_TRIES = args.num_demos * 8  # allow up to 8x attempts
 
 with h5py.File(OUT_PATH, "w") as h5:
     ep_grp = h5.create_group("episodes")
-    meta = h5.create_group("meta")
+    meta   = h5.create_group("meta")
     meta.attrs["cam_size"] = CAM
-    meta.attrs["robot"] = "panda"
-    meta.attrs["task"] = "PickCube-v1"
+    meta.attrs["robot"]    = "panda"
+    meta.attrs["task"]     = "PickCube-v1"
+    meta.attrs["policy"]   = "scripted_eef_delta"
 
-    for i in range(args.num_demos * 3):  # try 3x to get enough successes
+    for i in range(MAX_TRIES):
         if successes >= args.num_demos:
             break
         seed = args.seed_start + i
-        data = solve_and_record(recorder, seed)
+        data = collect_episode(env, seed)
+
         if data is None:
             failures += 1
+            if failures % 200 == 0:
+                print(f"  [collect] {successes} ok / {failures} fail (seed={seed})",
+                      flush=True)
             continue
 
         g = ep_grp.create_group(f"ep_{successes:05d}")
         for k, v in data.items():
             g.create_dataset(k, data=v, compression="gzip")
-        g.attrs["seed"] = seed
+        g.attrs["seed"]      = seed
         g.attrs["num_steps"] = len(data["action"])
         successes += 1
 
         if successes % 50 == 0:
-            print(f"  collected {successes}/{args.num_demos}  (failures: {failures})")
+            print(f"  [collect] {successes}/{args.num_demos} collected "
+                  f"(failures: {failures})", flush=True)
 
     meta.attrs["num_episodes"] = successes
     meta.attrs["num_failures"] = failures
 
-recorder.close()
-print(f"[collect] Done: {successes} episodes saved to {OUT_PATH}")
-print(f"          {failures} failures skipped")
+env.close()
+print(f"[collect] Done: {successes} episodes saved  ({failures} failures)", flush=True)
