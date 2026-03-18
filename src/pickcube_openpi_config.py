@@ -64,7 +64,7 @@ class PickCubeDataConfig(DataConfigFactory):
                         },
                         "state": "observation.state",
                         "actions": "action",
-                        "prompt": "task_description",
+                        # prompt comes from InjectDefaultPrompt in model_transforms
                     }
                 )
             ]
