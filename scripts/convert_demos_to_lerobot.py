@@ -108,10 +108,25 @@ with h5py.File(args.demos, "r") as h5:
 
 print(f"[convert] {len(ep_keys)} episodes saved to {OUT_DIR}")
 
-# Compute and save stats (required for openpi normalization)
-print("[convert] Computing stats ...")
-from lerobot.common.datasets.compute_stats import compute_stats
-stats = compute_stats(ds)
-ds.meta.save_stats(stats)
+# Aggregate per-episode stats into global stats and write meta/stats.json
+print("[convert] Consolidating dataset stats ...")
+from lerobot.common.datasets.compute_stats import aggregate_stats
+from lerobot.common.datasets.utils import write_json
+import numpy as _np
+
+ep_stats = list(ds.meta.episodes_stats.values())
+if ep_stats:
+    global_stats = aggregate_stats(ep_stats)
+
+    def _to_json(d):
+        if isinstance(d, dict):
+            return {k: _to_json(v) for k, v in d.items()}
+        elif isinstance(d, _np.ndarray):
+            return d.tolist()
+        return d
+
+    stats_path = OUT_DIR / "meta" / "stats.json"
+    write_json(_to_json(global_stats), stats_path)
+    print(f"[convert] Stats saved to {stats_path}")
 
 print(f"[convert] Done. Total frames: {ds.meta.total_frames}")
