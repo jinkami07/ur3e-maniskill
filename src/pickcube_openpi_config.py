@@ -58,7 +58,7 @@ class PickCubeDataConfig(DataConfigFactory):
             inputs=[
                 transforms.RepackTransform(
                     {
-                        "images": {
+                        "image": {
                             "front": "observation.images.front",
                             "wrist": "observation.images.wrist",
                         },
