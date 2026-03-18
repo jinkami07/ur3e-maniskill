@@ -76,17 +76,29 @@ class TensorImagesToNumpy(transforms.DataTransformFn):
     and add image_mask (all True) as required by Observation.from_dict."""
 
     def __call__(self, data: dict) -> dict:
-        if "image" in data:
-            data = dict(data)
-            converted = {}
-            for k, v in data["image"].items():
-                if isinstance(v, torch.Tensor):
-                    arr = v.permute(1, 2, 0).numpy().astype(np.uint8)
-                else:
-                    arr = np.asarray(v, dtype=np.uint8)
-                converted[k] = arr
-            data["image"] = converted
-            data["image_mask"] = {k: np.True_ for k in converted}
+        if "image" not in data:
+            return data
+        data = dict(data)
+
+        def _to_hwc(v):
+            if isinstance(v, torch.Tensor):
+                return v.permute(1, 2, 0).numpy().astype(np.uint8)
+            return np.asarray(v, dtype=np.uint8)
+
+        front = _to_hwc(data["image"]["front"])
+        wrist = _to_hwc(data["image"]["wrist"])
+
+        # pi0 expects base_0_rgb / left_wrist_0_rgb / right_wrist_0_rgb
+        data["image"] = {
+            "base_0_rgb":        front,
+            "left_wrist_0_rgb":  wrist,
+            "right_wrist_0_rgb": np.zeros_like(front),  # unused; padded
+        }
+        data["image_mask"] = {
+            "base_0_rgb":        np.True_,
+            "left_wrist_0_rgb":  np.True_,
+            "right_wrist_0_rgb": np.False_,  # masked out
+        }
         return data
 
 
