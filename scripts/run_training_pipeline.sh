@@ -24,7 +24,7 @@ NUM_DEMOS="${NUM_DEMOS:-500}"
 DEMOS_H5="/opt/pickcube_demos/demos.h5"
 LEROBOT_DIR="/opt/pickcube_lerobot"
 CKPT_DIR="/opt/openpi/checkpoints"
-LOG_DIR="/workspace/output/train_logs"
+LOG_DIR="/tmp/pipeline_logs"
 WANDB_API_KEY="${WANDB_API_KEY:-}"
 
 # Docker image (build が済んでいる前提)
