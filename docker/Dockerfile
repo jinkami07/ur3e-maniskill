@@ -44,11 +44,7 @@ SHELL ["conda", "run", "-n", "pi0", "/bin/bash", "-c"]
 # ── 1. numpy pin ──────────────────────────────────────────────────────────────
 RUN pip install --upgrade "numpy<2.0.0,>=1.22.4"
 
-# ── 2. PyTorch (CUDA 12.1) ───────────────────────────────────────────────────
-RUN pip install torch torchvision torchaudio \
-    --index-url https://download.pytorch.org/whl/cu121
-
-# ── 3. uv + openpi ───────────────────────────────────────────────────────────
+# ── 2. uv + openpi (torch は openpi の要件に合わせる) ────────────────────────
 RUN pip install uv
 WORKDIR /opt
 RUN GIT_LFS_SKIP_SMUDGE=1 git clone --recurse-submodules \
@@ -57,10 +53,8 @@ WORKDIR /opt/openpi
 RUN GIT_LFS_SKIP_SMUDGE=1 UV_PROJECT_ENVIRONMENT=/opt/conda/envs/pi0 uv sync \
     && GIT_LFS_SKIP_SMUDGE=1 uv pip install --python /opt/conda/envs/pi0/bin/python -e .
 
-# ── 4. re-pin (openpi may upgrade) ───────────────────────────────────────────
+# ── 3. numpy を再ピン（openpi が >= 2 に上げることがある）────────────────────
 RUN pip install --upgrade "numpy<2.0.0,>=1.22.4"
-RUN pip install torch torchvision torchaudio \
-    --index-url https://download.pytorch.org/whl/cu121
 
 # ── 5. ManiSkill3 + utilities ────────────────────────────────────────────────
 RUN pip install \
