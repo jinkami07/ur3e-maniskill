@@ -99,6 +99,9 @@ class TensorImagesToNumpy(transforms.DataTransformFn):
             "left_wrist_0_rgb":  np.True_,
             "right_wrist_0_rgb": np.False_,  # masked out
         }
+        # pi0 state_proj uses action_dim (7) as input; truncate 8-dim state to 7
+        if "state" in data and hasattr(data["state"], "__len__") and len(data["state"]) == 8:
+            data["state"] = np.asarray(data["state"])[:7]
         return data
 
 
