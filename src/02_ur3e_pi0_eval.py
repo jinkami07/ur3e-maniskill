@@ -102,6 +102,8 @@ def extract_images(obs: dict) -> tuple[np.ndarray, np.ndarray]:
     """base_camera (front) と hand_camera (wrist) の RGB を 224x224 uint8 で返す。"""
     def _get_rgb(sensor_key: str) -> np.ndarray:
         rgb = obs["sensor_data"][sensor_key]["rgb"]
+        if hasattr(rgb, "cpu"):
+            rgb = rgb.cpu()
         arr = np.asarray(rgb, dtype=np.uint8)
         if arr.ndim == 4:
             arr = arr[0]  # バッチ次元を除去
