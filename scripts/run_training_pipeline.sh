@@ -22,7 +22,8 @@ set -euo pipefail
 # ── 設定 ──────────────────────────────────────────────────────────────────────
 NUM_DEMOS="${NUM_DEMOS:-500}"
 DEMOS_H5="/opt/pickcube_demos/demos.h5"
-LEROBOT_DIR="/opt/pickcube_lerobot_v2"
+LEROBOT_MOUNT="/opt/pickcube_lerobot_v2"       # host volume mount point
+LEROBOT_DIR="$LEROBOT_MOUNT/dataset"           # actual dataset dir (subdirectory)
 CKPT_DIR="/opt/checkpoints"
 LOG_DIR="/tmp/pipeline_logs"
 WANDB_API_KEY="${WANDB_API_KEY:-}"
@@ -74,22 +75,21 @@ if [ "${SKIP_CONVERT:-0}" = "1" ] && [ -d "$LEROBOT_DIR" ]; then
     log "Step 2: SKIP (dataset already exists at $LEROBOT_DIR)"
 else
     log "Step 2: Converting HDF5 → LeRobot format → $LEROBOT_DIR"
-    # Note: do NOT mkdir LEROBOT_DIR - LeRobotDataset.create() requires non-existent dir
-    mkdir -p "$(dirname "$LEROBOT_DIR")"
+    mkdir -p "$LEROBOT_MOUNT"   # ensure mount point exists; dataset subdir created by lerobot
 
     docker run --rm \
         --runtime=nvidia \
         -e NVIDIA_VISIBLE_DEVICES=all \
         --entrypoint /opt/conda/envs/pi0/bin/python \
         -v /opt/pickcube_demos:/opt/pickcube_demos \
-        -v /opt:/opt \
+        -v "$LEROBOT_MOUNT:$LEROBOT_MOUNT" \
         -v "$(pwd)/scripts:/workspace/scripts" \
         -w /workspace \
         "$DOCKER_IMAGE" \
         scripts/convert_demos_to_lerobot.py \
             --demos "$DEMOS_H5" \
             --out "$LEROBOT_DIR" \
-            --repo-id pickcube_lerobot_v2 \
+            --repo-id dataset \
         2>&1 | tee "$LOG_DIR/convert.log"
 
     log "Step 2: Done"
@@ -107,8 +107,8 @@ docker run --rm \
     -e XLA_PYTHON_CLIENT_MEM_FRACTION=0.85 \
     -e WANDB_API_KEY="$WANDB_API_KEY" \
     -e WANDB_MODE=offline \
-    -e HF_LEROBOT_HOME=/opt \
-    -v /opt/pickcube_lerobot_v2:/opt/pickcube_lerobot_v2 \
+    -e HF_LEROBOT_HOME="$LEROBOT_MOUNT" \
+    -v "$LEROBOT_MOUNT:$LEROBOT_MOUNT" \
     -v /opt/checkpoints:/opt/checkpoints \
     -v "$(pwd)/scripts:/workspace/scripts" \
     -v "$(pwd)/src:/workspace/src" \

@@ -24,8 +24,8 @@ from openpi.training.config import (
     ModelTransformFactory,
 )
 
-DATASET_REPO_ID    = "pickcube_lerobot_v2"         # repo_id; with HF_LEROBOT_HOME=/opt → /opt/pickcube_lerobot_v2
-ASSETS_LOCAL_PATH  = "/opt/pickcube_lerobot_v2"   # norm_stats.json is here
+DATASET_REPO_ID    = "dataset"                     # repo_id; with HF_LEROBOT_HOME=/opt/pickcube_lerobot_v2 → /opt/pickcube_lerobot_v2/dataset
+ASSETS_LOCAL_PATH  = "/opt/pickcube_lerobot_v2/dataset"   # norm_stats.json is here
 ASSET_ID           = "pickcube"                # sub-dir under assets_dir
 
 CHECKPOINT_BASE    = "/opt/checkpoints"
