@@ -24,8 +24,8 @@ from openpi.training.config import (
     ModelTransformFactory,
 )
 
-DATASET_LOCAL_PATH = "/opt/pickcube_lerobot"   # LeRobot dataset inside container
-ASSETS_LOCAL_PATH  = "/opt/pickcube_lerobot"   # norm_stats.json is here
+DATASET_REPO_ID    = "pickcube_lerobot_v2"         # repo_id; with HF_LEROBOT_HOME=/opt → /opt/pickcube_lerobot_v2
+ASSETS_LOCAL_PATH  = "/opt/pickcube_lerobot_v2"   # norm_stats.json is here
 ASSET_ID           = "pickcube"                # sub-dir under assets_dir
 
 CHECKPOINT_BASE    = "/opt/checkpoints"
@@ -49,7 +49,7 @@ class PickCubeDataConfig(DataConfigFactory):
       task_description          (str)
     """
 
-    repo_id: str = DATASET_LOCAL_PATH
+    repo_id: str = DATASET_REPO_ID
     default_prompt: str = PROMPT
 
     @override
@@ -99,7 +99,7 @@ _PICKCUBE_CONFIG = _cfg.TrainConfig(
         action_horizon=10,
     ),
     data=PickCubeDataConfig(
-        repo_id=DATASET_LOCAL_PATH,
+        repo_id=DATASET_REPO_ID,
         assets=AssetsConfig(
             assets_dir=ASSETS_LOCAL_PATH,
             asset_id=ASSET_ID,

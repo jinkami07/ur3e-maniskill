@@ -34,7 +34,8 @@ args = parser.parse_args()
 
 OUT_DIR = Path(args.out)
 
-# Remove existing directory to ensure clean creation
+# LeRobotDataset.create() requires the output directory to not exist yet.
+# If it already exists (e.g. from a previous run), clear it first.
 if OUT_DIR.exists():
     print(f"[convert] Removing existing {OUT_DIR} ...")
     shutil.rmtree(OUT_DIR)

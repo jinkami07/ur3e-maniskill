@@ -22,7 +22,7 @@ set -euo pipefail
 # ── 設定 ──────────────────────────────────────────────────────────────────────
 NUM_DEMOS="${NUM_DEMOS:-500}"
 DEMOS_H5="/opt/pickcube_demos/demos.h5"
-LEROBOT_DIR="/opt/pickcube_lerobot"
+LEROBOT_DIR="/opt/pickcube_lerobot_v2"
 CKPT_DIR="/opt/checkpoints"
 LOG_DIR="/tmp/pipeline_logs"
 WANDB_API_KEY="${WANDB_API_KEY:-}"
@@ -74,19 +74,21 @@ if [ "${SKIP_CONVERT:-0}" = "1" ] && [ -d "$LEROBOT_DIR" ]; then
     log "Step 2: SKIP (dataset already exists at $LEROBOT_DIR)"
 else
     log "Step 2: Converting HDF5 → LeRobot format → $LEROBOT_DIR"
-    mkdir -p "$LEROBOT_DIR"
+    # Note: do NOT mkdir LEROBOT_DIR - LeRobotDataset.create() requires non-existent dir
+    mkdir -p "$(dirname "$LEROBOT_DIR")"
 
     docker run --rm \
         --runtime=nvidia \
         -e NVIDIA_VISIBLE_DEVICES=all \
         -v /opt/pickcube_demos:/opt/pickcube_demos \
-        -v /opt/pickcube_lerobot:/opt/pickcube_lerobot \
+        -v /opt:/opt \
         -v "$(pwd)/scripts:/workspace/scripts" \
         -w /workspace \
         "$DOCKER_IMAGE" \
         python scripts/convert_demos_to_lerobot.py \
             --demos "$DEMOS_H5" \
             --out "$LEROBOT_DIR" \
+            --repo-id pickcube_lerobot_v2 \
         2>&1 | tee "$LOG_DIR/convert.log"
 
     log "Step 2: Done"
@@ -105,7 +107,7 @@ docker run --rm \
     -e WANDB_API_KEY="$WANDB_API_KEY" \
     -e WANDB_MODE=offline \
     -e HF_LEROBOT_HOME=/opt \
-    -v /opt/pickcube_lerobot:/opt/pickcube_lerobot \
+    -v /opt/pickcube_lerobot_v2:/opt/pickcube_lerobot_v2 \
     -v /opt/checkpoints:/opt/checkpoints \
     -v "$(pwd)/scripts:/workspace/scripts" \
     -v "$(pwd)/src:/workspace/src" \
