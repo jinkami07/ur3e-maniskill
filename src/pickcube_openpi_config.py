@@ -49,7 +49,8 @@ class PartialCheckpointWeightLoader(weight_loaders.WeightLoader):
         flat_ref = flax.traverse_util.flatten_dict(params, sep="/")
         flat_loaded = flax.traverse_util.flatten_dict(loaded, sep="/")
 
-        result = {}
+        # Start from reference params (keeps full structure including LoRA and init values)
+        result = dict(flat_ref)
         skipped = []
         for k, v in flat_loaded.items():
             if k not in flat_ref:
@@ -57,19 +58,13 @@ class PartialCheckpointWeightLoader(weight_loaders.WeightLoader):
             ref = flat_ref[k]
             ref_shape = ref.shape if hasattr(ref, "shape") else tuple()
             if hasattr(v, "shape") and v.shape != ref_shape:
-                skipped.append(f"  {k}: ckpt {v.shape} != model {ref_shape}")
+                # Shape mismatch: keep reference (model-init) value
+                skipped.append(f"  {k}: ckpt {v.shape} != model {ref_shape} → keeping init")
                 continue
             result[k] = v.astype(ref.dtype) if hasattr(v, "dtype") and v.dtype != ref.dtype else v
 
-        # Fill missing LoRA weights from model init
-        import re
-        lora_pattern = re.compile(".*lora.*")
-        for k in flat_ref:
-            if lora_pattern.fullmatch(k) and k not in result:
-                result[k] = flat_ref[k]
-
         if skipped:
-            print(f"[PartialCheckpointWeightLoader] Skipped {len(skipped)} mismatched params:")
+            print(f"[PartialCheckpointWeightLoader] {len(skipped)} shape-mismatched params kept at init:")
             for s in skipped:
                 print(s)
 
