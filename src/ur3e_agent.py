@@ -29,7 +29,7 @@ from mani_skill.agents.controllers.pd_joint_pos import (
     PDJointPosMimicControllerConfig,
 )
 from mani_skill.agents.registration import register_agent
-from mani_skill.utils import common
+from mani_skill.utils import common, sapien_utils
 from mani_skill.utils.structs.actor import Actor
 
 # ── URDF path ─────────────────────────────────────────────────────────────────
@@ -79,13 +79,24 @@ class UR3e(BaseAgent):
 
     ee_link_name: str = TCP_LINK
 
-    @property
-    def finger1_link(self):
-        return self.robot.links_map["left_finger_link"]
+    def _after_init(self):
+        self.finger1_link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "left_finger_link"
+        )
+        self.finger2_link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "right_finger_link"
+        )
+        self.tcp = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), self.ee_link_name
+        )
 
     @property
-    def finger2_link(self):
-        return self.robot.links_map["right_finger_link"]
+    def tcp_pos(self):
+        return self.tcp.pose.p
+
+    @property
+    def tcp_pose(self):
+        return self.tcp.pose
 
     def is_static(self, threshold: float = 0.2):
         qvel = self.robot.get_qvel()[..., :-2]  # exclude finger joints
