@@ -1,44 +1,81 @@
 """
-HDF5 デモ → LeRobot HuggingFace データセット変換スクリプト
+HDF5 デモ → LeRobot v2 データセット変換スクリプト
 
-openpi は LeRobot 形式を期待するため、以下の列を持つ datasets.Dataset を作成する:
-  observation.images.front  (uint8, H x W x 3)
-  observation.images.wrist  (uint8, H x W x 3)
-  observation.state         (float32, 8)
-  action                    (float32, 7)
-  episode_index             (int64)
-  frame_index               (int64)
-  timestamp                 (float64)
-  task_description          (str)
+openpi は lerobot.LeRobotDataset 形式を期待するため、v2 フォーマットで保存する。
+  meta/info.json, meta/episodes.jsonl, meta/tasks.jsonl, meta/stats.json
+  data/chunk-000/episode_XXXXXX.parquet
+  images/{front,wrist}/episode_XXXXXX/frame_{:06d}.png
 
 Usage (inside container):
   python scripts/convert_demos_to_lerobot.py \
     --demos /opt/pickcube_demos/demos.h5 \
-    --out   /opt/pickcube_lerobot
+    --out   /opt/pickcube_lerobot \
+    --repo-id pickcube_lerobot
 """
 from __future__ import annotations
 
 import argparse
+import shutil
 from pathlib import Path
 
 import h5py
 import numpy as np
-from datasets import Dataset, Features, Image, Sequence, Value
 from PIL import Image as PILImage
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--demos", type=str, default="/opt/pickcube_demos/demos.h5")
-parser.add_argument("--out", type=str, default="/opt/pickcube_lerobot")
-parser.add_argument("--fps", type=float, default=10.0)
+parser.add_argument("--demos",   type=str, default="/opt/pickcube_demos/demos.h5")
+parser.add_argument("--out",     type=str, default="/opt/pickcube_lerobot")
+parser.add_argument("--repo-id", type=str, default="pickcube_lerobot",
+                    help="Logical repo_id (no slashes). Used as directory name under HF_LEROBOT_HOME.")
+parser.add_argument("--fps",     type=int, default=10)
 parser.add_argument("--task-desc", type=str, default="pick up the red cube")
+parser.add_argument("--cam-size",  type=int, default=224)
 args = parser.parse_args()
 
 OUT_DIR = Path(args.out)
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Remove existing directory to ensure clean creation
+if OUT_DIR.exists():
+    print(f"[convert] Removing existing {OUT_DIR} ...")
+    shutil.rmtree(OUT_DIR)
+
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+
+CAM = args.cam_size
+FEATURES = {
+    "observation.images.front": {
+        "dtype": "image",
+        "shape": (CAM, CAM, 3),
+        "names": ["height", "width", "channels"],
+    },
+    "observation.images.wrist": {
+        "dtype": "image",
+        "shape": (CAM, CAM, 3),
+        "names": ["height", "width", "channels"],
+    },
+    "observation.state": {
+        "dtype": "float32",
+        "shape": (8,),
+        "names": ["eef_x", "eef_y", "eef_z", "eef_qx", "eef_qy", "eef_qz", "eef_qw", "gripper"],
+    },
+    "action": {
+        "dtype": "float32",
+        "shape": (7,),
+        "names": ["dx", "dy", "dz", "drx", "dry", "drz", "gripper"],
+    },
+}
+
+print(f"[convert] Creating LeRobot v2 dataset at {OUT_DIR} (repo_id={args.repo_id}) ...")
+
+ds = LeRobotDataset.create(
+    repo_id=args.repo_id,
+    fps=args.fps,
+    root=OUT_DIR,
+    features=FEATURES,
+    use_videos=False,   # save images as PNG files
+)
 
 print(f"[convert] Reading demos from {args.demos} ...")
-
-rows = []
 
 with h5py.File(args.demos, "r") as h5:
     episodes = h5["episodes"]
@@ -47,103 +84,33 @@ with h5py.File(args.demos, "r") as h5:
 
     for ep_idx, ep_key in enumerate(ep_keys):
         g = episodes[ep_key]
-        front = g["front_rgb"][:]   # (T, H, W, 3) uint8
-        wrist = g["wrist_rgb"][:]   # (T, H, W, 3) uint8
-        state = g["state"][:]       # (T, 8) float32
-        action = g["action"][:]     # (T, 7) float32
-        T = len(action)
+        front_arr = g["front_rgb"][:]   # (T, H, W, 3) uint8
+        wrist_arr = g["wrist_rgb"][:]   # (T, H, W, 3) uint8
+        state_arr = g["state"][:]       # (T, 8) float32
+        action_arr = g["action"][:]     # (T, 7) float32
+        T = len(action_arr)
 
         for t in range(T):
-            rows.append({
-                "observation.images.front": front[t],
-                "observation.images.wrist": wrist[t],
-                "observation.state": state[t].tolist(),
-                "action": action[t].tolist(),
-                "episode_index": ep_idx,
-                "frame_index": t,
-                "timestamp": float(t) / args.fps,
-                "task_description": args.task_desc,
-            })
+            frame = {
+                "observation.images.front": PILImage.fromarray(front_arr[t]),
+                "observation.images.wrist": PILImage.fromarray(wrist_arr[t]),
+                "observation.state": state_arr[t],
+                "action": action_arr[t],
+                "task": args.task_desc,
+            }
+            ds.add_frame(frame)
 
-        if ep_idx % 50 == 0:
-            print(f"  processed {ep_idx}/{len(ep_keys)} episodes ({len(rows)} frames)")
+        ds.save_episode()
 
-print(f"[convert] Total frames: {len(rows)}")
+        if (ep_idx + 1) % 50 == 0:
+            print(f"  [{ep_idx+1}/{len(ep_keys)} episodes saved]")
 
-# ── Build HuggingFace Dataset ─────────────────────────────────────────────────
-# images are stored as PIL Images (HF Image feature)
+print(f"[convert] {len(ep_keys)} episodes saved to {OUT_DIR}")
 
-print("[convert] Building HuggingFace Dataset ...")
+# Compute and save stats (required for openpi normalization)
+print("[convert] Computing stats ...")
+from lerobot.common.datasets.compute_stats import compute_stats
+stats = compute_stats(ds)
+ds.meta.save_stats(stats)
 
-def make_pil(arr):
-    return PILImage.fromarray(arr.astype(np.uint8))
-
-# Separate columns
-fronts = [make_pil(r["observation.images.front"]) for r in rows]
-wrists = [make_pil(r["observation.images.wrist"]) for r in rows]
-states = [r["observation.state"] for r in rows]
-actions_list = [r["action"] for r in rows]
-ep_idxs = [r["episode_index"] for r in rows]
-frame_idxs = [r["frame_index"] for r in rows]
-timestamps = [r["timestamp"] for r in rows]
-task_descs = [r["task_description"] for r in rows]
-
-features = Features({
-    "observation.images.front": Image(),
-    "observation.images.wrist": Image(),
-    "observation.state": Sequence(Value("float32"), length=8),
-    "action": Sequence(Value("float32"), length=7),
-    "episode_index": Value("int64"),
-    "frame_index": Value("int64"),
-    "timestamp": Value("float64"),
-    "task_description": Value("string"),
-})
-
-ds = Dataset.from_dict(
-    {
-        "observation.images.front": fronts,
-        "observation.images.wrist": wrists,
-        "observation.state": states,
-        "action": actions_list,
-        "episode_index": ep_idxs,
-        "frame_index": frame_idxs,
-        "timestamp": timestamps,
-        "task_description": task_descs,
-    },
-    features=features,
-)
-
-# ── Save ──────────────────────────────────────────────────────────────────────
-ds.save_to_disk(str(OUT_DIR))
-print(f"[convert] Saved dataset ({len(ds)} rows) to {OUT_DIR}")
-
-# ── Compute norm stats ────────────────────────────────────────────────────────
-print("[convert] Computing norm stats ...")
-states_np = np.array(states, dtype=np.float32)
-actions_np = np.array(actions_list, dtype=np.float32)
-
-norm_stats = {
-    "state": {
-        "mean": states_np.mean(0).tolist(),
-        "std": states_np.std(0).clip(1e-6).tolist(),
-        "min": states_np.min(0).tolist(),
-        "max": states_np.max(0).tolist(),
-        "q01": np.quantile(states_np, 0.01, axis=0).tolist(),
-        "q99": np.quantile(states_np, 0.99, axis=0).tolist(),
-    },
-    "action": {
-        "mean": actions_np.mean(0).tolist(),
-        "std": actions_np.std(0).clip(1e-6).tolist(),
-        "min": actions_np.min(0).tolist(),
-        "max": actions_np.max(0).tolist(),
-        "q01": np.quantile(actions_np, 0.01, axis=0).tolist(),
-        "q99": np.quantile(actions_np, 0.99, axis=0).tolist(),
-    },
-}
-
-import json
-norm_stats_path = OUT_DIR / "norm_stats.json"
-with open(norm_stats_path, "w") as f:
-    json.dump(norm_stats, f, indent=2)
-print(f"[convert] Norm stats saved to {norm_stats_path}")
-print("[convert] Done.")
+print(f"[convert] Done. Total frames: {ds.meta.total_frames}")
