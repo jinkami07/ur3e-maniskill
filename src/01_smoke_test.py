@@ -94,6 +94,8 @@ try:
     # バッチ次元を除去 (1, H, W, 3) → (H, W, 3)
     if rgb.ndim == 4:
         rgb = rgb[0]
+    if hasattr(rgb, "cpu"):
+        rgb = rgb.cpu()
     rgb = np.asarray(rgb, dtype=np.uint8)
 
     frame_path = out_dir / "smoke_test_frame.png"
