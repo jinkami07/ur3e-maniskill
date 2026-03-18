@@ -14,6 +14,9 @@ try:
 except ImportError:
     from typing_extensions import override  # Python 3.11 fallback
 
+import numpy as np
+import torch
+
 from openpi.models.pi0 import pi0_config  # Pi0Config lives in pi0_config submodule
 import openpi.transforms as transforms
 from openpi.training import config as _cfg
@@ -23,6 +26,22 @@ from openpi.training.config import (
     DataConfigFactory,
     ModelTransformFactory,
 )
+
+@dataclasses.dataclass(frozen=True)
+class TensorImagesToNumpy(transforms.DataTransformFn):
+    """Convert lerobot image tensors (C,H,W) to numpy uint8 arrays (H,W,C) for openpi."""
+
+    def __call__(self, data: dict) -> dict:
+        if "image" in data:
+            data = dict(data)
+            data["image"] = {
+                k: (v.permute(1, 2, 0).numpy().astype(np.uint8)
+                    if isinstance(v, torch.Tensor)
+                    else np.asarray(v, dtype=np.uint8))
+                for k, v in data["image"].items()
+            }
+        return data
+
 
 DATASET_REPO_ID    = "dataset"                     # repo_id; with HF_LEROBOT_HOME=/opt/pickcube_lerobot_v2 → /opt/pickcube_lerobot_v2/dataset
 ASSETS_LOCAL_PATH  = "/opt/pickcube_lerobot_v2/dataset"   # norm_stats.json is here
@@ -69,8 +88,8 @@ class PickCubeDataConfig(DataConfigFactory):
                 )
             ]
         )
-        # No delta transform needed (actions already in delta space)
-        data_transforms = transforms.Group()
+        # Convert image tensors (C,H,W) → numpy uint8 (H,W,C) for openpi
+        data_transforms = transforms.Group(inputs=[TensorImagesToNumpy()])
 
         model_transforms = ModelTransformFactory(
             default_prompt=self.default_prompt
