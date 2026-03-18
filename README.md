@@ -1,4 +1,4 @@
-# ur3e-maniskill 作戦計画
+# ur3e-maniskill
 
 ## 目的
 

@@ -23,7 +23,7 @@ set -euo pipefail
 NUM_DEMOS="${NUM_DEMOS:-500}"
 DEMOS_H5="/opt/pickcube_demos/demos.h5"
 LEROBOT_DIR="/opt/pickcube_lerobot"
-CKPT_DIR="/opt/openpi/checkpoints"
+CKPT_DIR="/opt/checkpoints"
 LOG_DIR="/tmp/pipeline_logs"
 WANDB_API_KEY="${WANDB_API_KEY:-}"
 
@@ -105,7 +105,7 @@ docker run --rm \
     -e WANDB_API_KEY="$WANDB_API_KEY" \
     -e WANDB_MODE=offline \
     -v /opt/pickcube_lerobot:/opt/pickcube_lerobot \
-    -v /opt/openpi/checkpoints:/opt/openpi/checkpoints \
+    -v /opt/checkpoints:/opt/checkpoints \
     -v "$(pwd)/scripts:/workspace/scripts" \
     -v "$(pwd)/src:/workspace/src" \
     -v /tmp/train_output:/workspace/output \

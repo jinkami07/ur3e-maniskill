@@ -14,13 +14,12 @@ try:
 except ImportError:
     from typing_extensions import override  # Python 3.11 fallback
 
-import openpi.models.pi0 as pi0_config
+from openpi.models.pi0 import pi0_config  # Pi0Config lives in pi0_config submodule
 import openpi.transforms as transforms
 from openpi.training import config as _cfg
 from openpi.training import weight_loaders
 from openpi.training.config import (
     AssetsConfig,
-    DataConfig,
     DataConfigFactory,
     ModelTransformFactory,
 )
@@ -29,8 +28,10 @@ DATASET_LOCAL_PATH = "/opt/pickcube_lerobot"   # LeRobot dataset inside containe
 ASSETS_LOCAL_PATH  = "/opt/pickcube_lerobot"   # norm_stats.json is here
 ASSET_ID           = "pickcube"                # sub-dir under assets_dir
 
-CHECKPOINT_BASE    = "/opt/openpi/checkpoints"
-PRETRAINED_PARAMS  = "gs://openpi-assets/checkpoints/pi0_base/params"
+CHECKPOINT_BASE    = "/opt/checkpoints"
+# Use local pi0_libero_low_mem_finetune checkpoint as starting point
+# (avoids GCS auth issues; same LoRA architecture gemma_2b_lora + gemma_300m_lora)
+PRETRAINED_PARAMS  = "/opt/checkpoints/pi0_libero_low_mem_finetune/libero_ft/29999"
 
 PROMPT = "pick up the red cube"
 
