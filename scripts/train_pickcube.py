@@ -20,23 +20,13 @@ from pathlib import Path
 
 OPENPI_ROOT = Path("/opt/openpi")
 sys.path.insert(0, str(OPENPI_ROOT / "src"))
+sys.path.insert(0, str(OPENPI_ROOT / "scripts"))  # for train.py
 sys.path.insert(0, "/workspace/src")
 
 import numpy as np
-import wandb
-
-# ── wandb auth ─────────────────────────────────────────────────────────────────
-# Modern wandb API keys (wandb_v1_...) are >40 chars and must be passed via
-# WANDB_API_KEY env var — wandb.login(key=...) rejects them with a length check.
-# We ensure the env var is set so openpi's built-in wandb support picks it up.
-WANDB_API_KEY = os.environ.get("WANDB_API_KEY", "")
-if not WANDB_API_KEY:
-    print("[warn] WANDB_API_KEY not set — wandb will run in offline mode")
-else:
-    os.environ["WANDB_API_KEY"] = WANDB_API_KEY  # ensure it's propagated
 
 # ── openpi imports ─────────────────────────────────────────────────────────────
-import openpi.training.train as _train
+import train as _openpi_train          # /opt/openpi/scripts/train.py
 import openpi.training.config as _cfg
 from pickcube_openpi_config import get_pickcube_config
 
@@ -188,9 +178,9 @@ def main():
     print(f"[train] Steps: {config.num_train_steps}, batch: {config.batch_size}")
     print(f"[train] Checkpoint dir: {config.checkpoint_base_dir}")
 
-    # openpi's built-in training (wandb_enabled=True handles basic metrics)
+    # openpi's built-in training — calls scripts/train.py::main(config)
     try:
-        _train.train(config)
+        _openpi_train.main(config)
     except Exception as e:
         print(f"[train] ERROR: {e}")
         raise
