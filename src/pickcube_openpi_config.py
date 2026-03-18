@@ -177,7 +177,7 @@ _PICKCUBE_CONFIG = _cfg.TrainConfig(
         paligemma_variant="gemma_2b_lora",
         action_expert_variant="gemma_300m_lora",
         action_dim=7,
-        action_horizon=10,
+        action_horizon=4,   # reduced from 10 to save GPU memory
     ),
     data=PickCubeDataConfig(
         repo_id=DATASET_REPO_ID,
@@ -195,7 +195,7 @@ _PICKCUBE_CONFIG = _cfg.TrainConfig(
     ).get_freeze_filter(),
     ema_decay=None,            # off for LoRA
     num_train_steps=10_000,
-    batch_size=4,              # reduced for L4 24GB OOM prevention
+    batch_size=2,              # small to fit L4 24GB
     log_interval=50,
     save_interval=500,
     keep_period=1000,
