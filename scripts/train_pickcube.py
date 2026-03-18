@@ -25,12 +25,15 @@ sys.path.insert(0, "/workspace/src")
 import numpy as np
 import wandb
 
-# ── wandb login ────────────────────────────────────────────────────────────────
+# ── wandb auth ─────────────────────────────────────────────────────────────────
+# Modern wandb API keys (wandb_v1_...) are >40 chars and must be passed via
+# WANDB_API_KEY env var — wandb.login(key=...) rejects them with a length check.
+# We ensure the env var is set so openpi's built-in wandb support picks it up.
 WANDB_API_KEY = os.environ.get("WANDB_API_KEY", "")
-if WANDB_API_KEY:
-    wandb.login(key=WANDB_API_KEY)
+if not WANDB_API_KEY:
+    print("[warn] WANDB_API_KEY not set — wandb will run in offline mode")
 else:
-    print("[warn] WANDB_API_KEY not set — wandb may not work")
+    os.environ["WANDB_API_KEY"] = WANDB_API_KEY  # ensure it's propagated
 
 # ── openpi imports ─────────────────────────────────────────────────────────────
 import openpi.training.train as _train
