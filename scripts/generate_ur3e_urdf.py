@@ -17,6 +17,7 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── 1. xacro で UR3e アームを生成 ────────────────────────────────────────────
 xacro_candidates = [
+    UR_DESC_ROOT / "urdf" / "ur3e.xacro",
     UR_DESC_ROOT / "urdf" / "ur3e.urdf.xacro",
     UR_DESC_ROOT / "urdf" / "ur3e_robot.urdf.xacro",
 ]
