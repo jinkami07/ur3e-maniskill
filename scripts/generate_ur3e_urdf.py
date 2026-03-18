@@ -61,6 +61,12 @@ if result.returncode != 0:
 
 arm_urdf = result.stdout
 
+# ── 2b. package://ur_description → 絶対パスに置換 ────────────────────────────
+#  xacro 出力に残る package://ur_description を絶対パスに変換し
+#  ROS なし環境でも SAPIEN がメッシュを解決できるようにする
+arm_urdf = arm_urdf.replace("package://ur_description", str(UR_DESC_ROOT))
+print(f"[info] Replaced package://ur_description with {UR_DESC_ROOT}")
+
 # ── 3. シンプルな並列グリッパー追加 ──────────────────────────────────────────
 GRIPPER_URDF = """
   <!-- ========================================================== -->
