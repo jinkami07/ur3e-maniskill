@@ -29,17 +29,21 @@ from openpi.training.config import (
 
 @dataclasses.dataclass(frozen=True)
 class TensorImagesToNumpy(transforms.DataTransformFn):
-    """Convert lerobot image tensors (C,H,W) to numpy uint8 arrays (H,W,C) for openpi."""
+    """Convert lerobot image tensors (C,H,W) to numpy uint8 arrays (H,W,C) for openpi,
+    and add image_mask (all True) as required by Observation.from_dict."""
 
     def __call__(self, data: dict) -> dict:
         if "image" in data:
             data = dict(data)
-            data["image"] = {
-                k: (v.permute(1, 2, 0).numpy().astype(np.uint8)
-                    if isinstance(v, torch.Tensor)
-                    else np.asarray(v, dtype=np.uint8))
-                for k, v in data["image"].items()
-            }
+            converted = {}
+            for k, v in data["image"].items():
+                if isinstance(v, torch.Tensor):
+                    arr = v.permute(1, 2, 0).numpy().astype(np.uint8)
+                else:
+                    arr = np.asarray(v, dtype=np.uint8)
+                converted[k] = arr
+            data["image"] = converted
+            data["image_mask"] = {k: np.True_ for k in converted}
         return data
 
 
