@@ -195,7 +195,7 @@ _PICKCUBE_CONFIG = _cfg.TrainConfig(
     ).get_freeze_filter(),
     ema_decay=None,            # off for LoRA
     num_train_steps=10_000,
-    batch_size=16,             # L4 24GB is comfortable with 16
+    batch_size=4,              # reduced for L4 24GB OOM prevention
     log_interval=50,
     save_interval=500,
     keep_period=1000,
