@@ -171,13 +171,13 @@ class PickCubeDataConfig(DataConfigFactory):
 
 _PICKCUBE_CONFIG = _cfg.TrainConfig(
     name="pi0_pickcube_lora",
-    exp_name="lora_ft_v1",
+    exp_name="lora_ft_h100",
     # LoRA fine-tuning of pi0 base
     model=pi0_config.Pi0Config(
         paligemma_variant="gemma_2b_lora",
         action_expert_variant="gemma_300m_lora",
         action_dim=7,
-        action_horizon=4,   # reduced from 10 to save GPU memory
+        action_horizon=10,  # full horizon for H100
     ),
     data=PickCubeDataConfig(
         repo_id=DATASET_REPO_ID,
@@ -186,7 +186,7 @@ _PICKCUBE_CONFIG = _cfg.TrainConfig(
             asset_id=ASSET_ID,
         ),
     ),
-    # Load pretrained weights; skip action layers with different action_dim
+    # Load pretrained weights; skip action layers with different action_dim/horizon
     weight_loader=PartialCheckpointWeightLoader(PRETRAINED_PARAMS),
     # LoRA freeze: only train LoRA adapters
     freeze_filter=pi0_config.Pi0Config(
@@ -194,11 +194,11 @@ _PICKCUBE_CONFIG = _cfg.TrainConfig(
         action_expert_variant="gemma_300m_lora",
     ).get_freeze_filter(),
     ema_decay=None,            # off for LoRA
-    num_train_steps=10_000,
-    batch_size=1,              # minimal to fit L4 24GB
+    num_train_steps=100_000,
+    batch_size=8,              # H100 80GB
     log_interval=50,
-    save_interval=500,
-    keep_period=1000,
+    save_interval=25000,
+    keep_period=25000,
     checkpoint_base_dir=CHECKPOINT_BASE,
     assets_base_dir=ASSETS_LOCAL_PATH,
     project_name="ur3e-pickcube",

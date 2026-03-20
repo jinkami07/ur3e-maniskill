@@ -106,7 +106,6 @@ docker run --rm \
     -e XLA_PYTHON_CLIENT_PREALLOCATE=true \
     -e XLA_PYTHON_CLIENT_MEM_FRACTION=0.95 \
     -e WANDB_API_KEY="$WANDB_API_KEY" \
-    -e WANDB_MODE=offline \
     -e HF_LEROBOT_HOME="$LEROBOT_MOUNT" \
     -v "$LEROBOT_MOUNT:$LEROBOT_MOUNT" \
     -v /opt/checkpoints:/opt/checkpoints \
