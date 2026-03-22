@@ -1,0 +1,27 @@
+services:
+  tdmpc2:
+    build:
+      context: ../..          # プロジェクトルート
+      dockerfile: tdmpc2/docker/Dockerfile
+    image: ur3e-tdmpc2:latest
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - MANI_SKILL_RENDER_BACKEND=egl
+      - UR3E_URDF=/opt/ur3e/ur3e_with_gripper.urdf
+      - WANDB_API_KEY=${WANDB_API_KEY}
+      - CHECKPOINT_DIR=/opt/checkpoints/tdmpc2
+      - STEPS=1000000
+      - NUM_ENVS=8
+    volumes:
+      - ../../src:/workspace/src             # ur3e_agent.py (共有)
+      - ../../scripts:/workspace/scripts     # generate_ur3e_urdf.py
+      - ../scripts:/workspace/tdmpc2/scripts
+      - ../src:/workspace/tdmpc2/src
+      - ../cfgs:/workspace/tdmpc2/cfgs
+      - /opt/checkpoints:/opt/checkpoints
+      - ../output:/workspace/tdmpc2/output
+    shm_size: "4g"
+    working_dir: /workspace
+    command: python tdmpc2/scripts/train_tdmpc2.py

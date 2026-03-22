@@ -110,9 +110,7 @@ ASSETS_LOCAL_PATH  = "/opt/pickcube_lerobot_v2/dataset"   # norm_stats.json is h
 ASSET_ID           = "pickcube"                # sub-dir under assets_dir
 
 CHECKPOINT_BASE    = "/opt/checkpoints"
-# Use local pi0_libero_low_mem_finetune checkpoint as starting point
-# (avoids GCS auth issues; same LoRA architecture gemma_2b_lora + gemma_300m_lora)
-PRETRAINED_PARAMS  = "/opt/checkpoints/pi0_libero_low_mem_finetune/libero_ft/29999/params"
+PRETRAINED_PARAMS  = "/opt/checkpoints/pi0_libero/params"
 
 PROMPT = "pick up the red cube"
 
@@ -171,13 +169,13 @@ class PickCubeDataConfig(DataConfigFactory):
 
 _PICKCUBE_CONFIG = _cfg.TrainConfig(
     name="pi0_pickcube_lora",
-    exp_name="lora_ft_h100",
+    exp_name="lora_ft_v4",
     # LoRA fine-tuning of pi0 base
     model=pi0_config.Pi0Config(
         paligemma_variant="gemma_2b_lora",
         action_expert_variant="gemma_300m_lora",
         action_dim=7,
-        action_horizon=10,  # full horizon for H100
+        action_horizon=8,
     ),
     data=PickCubeDataConfig(
         repo_id=DATASET_REPO_ID,
@@ -195,10 +193,10 @@ _PICKCUBE_CONFIG = _cfg.TrainConfig(
     ).get_freeze_filter(),
     ema_decay=None,            # off for LoRA
     num_train_steps=100_000,
-    batch_size=8,              # H100 80GB
+    batch_size=1,              # L4 24GB
     log_interval=50,
-    save_interval=25000,
-    keep_period=25000,
+    save_interval=25_000,
+    keep_period=25_000,
     checkpoint_base_dir=CHECKPOINT_BASE,
     assets_base_dir=ASSETS_LOCAL_PATH,
     project_name="ur3e-pickcube",

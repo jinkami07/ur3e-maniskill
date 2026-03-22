@@ -24,12 +24,16 @@ import torch
 
 # ── Args ──────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
-parser.add_argument("--num-demos",  type=int, default=500)
-parser.add_argument("--out",        type=str, default="/opt/pickcube_demos/demos.h5")
-parser.add_argument("--cam-size",   type=int, default=224)
-parser.add_argument("--seed-start", type=int, default=0)
-parser.add_argument("--max-steps",  type=int, default=300)
+parser.add_argument("--num-demos",      type=int,   default=500)
+parser.add_argument("--out",            type=str,   default="/opt/pickcube_demos/demos.h5")
+parser.add_argument("--cam-size",       type=int,   default=224)
+parser.add_argument("--seed-start",     type=int,   default=0)
+parser.add_argument("--max-steps",      type=int,   default=300)
+parser.add_argument("--approach-noise", type=float, default=0.02,
+                    help="XY noise (m) added to approach target for diversity")
 args = parser.parse_args()
+
+rng = np.random.default_rng(seed=42)
 
 OUT_PATH = Path(args.out)
 OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -61,7 +65,7 @@ def _delta_action(tcp_pos, target_pos, gripper):
 
 # ── Episode collection ────────────────────────────────────────────────────────
 
-def collect_episode(env, seed):
+def collect_episode(env, seed, xy_noise=0.0):
     """
     Run one episode of PickCube-v1 with phase-based scripted policy.
     Returns data dict on success, None on failure.
@@ -69,11 +73,18 @@ def collect_episode(env, seed):
     obs, _ = env.reset(seed=seed)
     env_u = env.unwrapped
 
+    # Hide goal_site (green sphere) — visual noise unrelated to "pick up the red cube"
+    try:
+        env_u.goal_site.set_visibility(0)
+    except Exception:
+        pass
+
     fronts, wrists, states, acts = [], [], [], []
 
     phase = 0
     phase_timer = 0
     OPEN, CLOSE = 1.0, -1.0
+    gripper_closed = False  # once closed, never reopen
 
     for step in range(args.max_steps):
         # ── Extract observation ──────────────────────────────────────────────
@@ -96,10 +107,10 @@ def collect_episode(env, seed):
 
         # ── Phase logic ──────────────────────────────────────────────────────
         if phase == 0:
-            # Move above cube with gripper open
-            above = cube_pos + np.array([0.0, 0.0, 0.20])
+            # Move above cube with gripper open (with slight XY noise for diversity)
+            above = cube_pos + np.array([xy_noise[0], xy_noise[1], 0.20])
             action = _delta_action(tcp_pos, above, OPEN)
-            xy_dist = np.linalg.norm(tcp_pos[:2] - cube_pos[:2])
+            xy_dist = np.linalg.norm(tcp_pos[:2] - (cube_pos[:2] + xy_noise[:2]))
             if tcp_pos[2] > cube_pos[2] + 0.15 and xy_dist < 0.04:
                 phase = 1
 
@@ -114,6 +125,7 @@ def collect_episode(env, seed):
 
         elif phase == 2:
             # Close gripper, hold position
+            gripper_closed = True
             grasp_target = cube_pos + np.array([0.0, 0.0, 0.01])
             action = _delta_action(tcp_pos, grasp_target, CLOSE)
             phase_timer += 1
@@ -121,8 +133,13 @@ def collect_episode(env, seed):
                 phase = 3
 
         else:
-            # Lift to goal
+            # Lift to goal_site position
             action = _delta_action(tcp_pos, goal_pos, CLOSE)
+
+        # Gripper lock: once closed, force CLOSE for rest of episode
+        if gripper_closed:
+            action = action.copy()
+            action[6] = CLOSE
 
         # Record (obs BEFORE step)
         fronts.append(front)
@@ -179,7 +196,8 @@ with h5py.File(OUT_PATH, "w") as h5:
         if successes >= args.num_demos:
             break
         seed = args.seed_start + i
-        data = collect_episode(env, seed)
+        xy_noise = rng.uniform(-args.approach_noise, args.approach_noise, size=2)
+        data = collect_episode(env, seed, xy_noise=np.append(xy_noise, 0.0))
 
         if data is None:
             failures += 1

@@ -9,7 +9,7 @@ ManiSkill3 + UR3e 動作確認スクリプト
   5. カメラ画像を output/smoke_test_frame.png に保存
 
 Usage:
-  python src/01_smoke_test.py
+  python pi0/src/01_smoke_test.py
 """
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+
+sys.path.insert(0, "/workspace/src")  # ur3e_agent (共有)
 
 import numpy as np
 

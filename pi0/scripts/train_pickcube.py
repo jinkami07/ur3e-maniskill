@@ -9,7 +9,7 @@ openpi の built-in wandb サポート (wandb_enabled=True) で基本メトリ�
   - 訓練完了後: PickCube-v1 ロールアウト × 5 エピソードで成功率 + 動画を記録
 
 Usage (inside container):
-  WANDB_API_KEY=<key> python scripts/train_pickcube.py
+  WANDB_API_KEY=<key> python pi0/scripts/train_pickcube.py
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from pathlib import Path
 OPENPI_ROOT = Path("/opt/openpi")
 sys.path.insert(0, str(OPENPI_ROOT / "src"))
 sys.path.insert(0, str(OPENPI_ROOT / "scripts"))  # for train.py
-sys.path.insert(0, "/workspace/src")
+sys.path.insert(0, "/workspace/pi0/src")
 
 import numpy as np
 

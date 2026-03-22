@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ── entrypoint ────────────────────────────────────────────────────────────────
-COPY docker/entrypoint.sh /entrypoint.sh
+COPY pi0/docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # ── Miniforge ─────────────────────────────────────────────────────────────────

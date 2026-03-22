@@ -2,7 +2,7 @@
 PickCube-v1 ロールアウト評価スクリプト (standalone)
 
 Usage:
-  python scripts/run_rollout_eval.py --checkpoint /opt/checkpoints/pi0_pickcube_lora/lora_ft_v1/9999
+  python pi0/scripts/run_rollout_eval.py --checkpoint /opt/checkpoints/pi0_pickcube_lora/lora_ft_v1/9999
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ args = parser.parse_args()
 
 OPENPI_ROOT = Path("/opt/openpi")
 sys.path.insert(0, str(OPENPI_ROOT / "src"))
-sys.path.insert(0, "/workspace/src")
+sys.path.insert(0, "/workspace/pi0/src")
 
 import numpy as np
 import wandb
@@ -62,12 +62,22 @@ env = gym.make(
     max_episode_steps=300,
 )
 
+PANDA_HOME_QPOS = np.array([0.0, -0.7854, 0.0, -2.3562, 0.0, 1.5708, 0.7854, 0.04, 0.04],
+                            dtype=np.float32)
+
 PROMPT = "pick up the red cube"
 successes = 0
 all_frames = []
 
 for ep in range(args.num_episodes):
     obs, _ = env.reset(seed=3000 + ep)
+    env_u = env.unwrapped
+    env_u.agent.robot.set_qpos(PANDA_HOME_QPOS)
+    env_u.agent.robot.set_qvel(np.zeros(9))
+    try:
+        env_u.goal_site.set_visibility(0)
+    except Exception:
+        pass
     ep_frames = []
     done = False
     step = 0

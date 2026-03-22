@@ -1,8 +1,8 @@
 services:
   sandbox:
     build:
-      context: ..
-      dockerfile: docker/Dockerfile
+      context: ../..
+      dockerfile: pi0/docker/Dockerfile
       platforms:
         - linux/amd64
     runtime: nvidia
@@ -24,8 +24,9 @@ services:
       - OPENPI_CONF=${OPENPI_CONF:-pi0_libero_low_mem_finetune}
     volumes:
       # スクリプトをマウント（コンテナ再ビルド不要で編集可）
-      - ../src:/workspace/src
-      - ../scripts:/workspace/scripts
+      - ../../src:/workspace/src
+      - ../../pi0/src:/workspace/pi0/src
+      - ../../pi0/scripts:/workspace/pi0/scripts
       # チェックポイントをホストに永続化
       - /opt/openpi/checkpoints:/opt/openpi/checkpoints
       # デモデータ + LeRobot データセット

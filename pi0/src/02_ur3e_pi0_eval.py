@@ -9,13 +9,13 @@ ManiSkill3 + UR3e + pi0 評価スクリプト
 
 Usage:
   # プリトレーニド (pi05)
-  python src/02_ur3e_pi0_eval.py
+  python pi0/src/02_ur3e_pi0_eval.py
 
   # ファインチューニング済みチェックポイント
-  CKPT_DIR=/opt/openpi/checkpoints/my_checkpoint python src/02_ur3e_pi0_eval.py
+  CKPT_DIR=/opt/openpi/checkpoints/my_checkpoint python pi0/src/02_ur3e_pi0_eval.py
 
   # 設定変更
-  NUM_EPISODES=2 TOTAL_STEPS=100 python src/02_ur3e_pi0_eval.py
+  NUM_EPISODES=2 TOTAL_STEPS=100 python pi0/src/02_ur3e_pi0_eval.py
 """
 
 from __future__ import annotations
@@ -23,6 +23,9 @@ from __future__ import annotations
 import builtins
 import json
 import os
+import sys
+
+sys.path.insert(0, "/workspace/src")  # ur3e_agent (共有)
 from pathlib import Path
 
 import imageio
