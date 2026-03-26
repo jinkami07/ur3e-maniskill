@@ -82,14 +82,15 @@ for ep in range(args.num_episodes):
     done = False
     step = 0
     info = {}
+    ep_log = []  # per-step metrics for this episode
+
+    def _np(t):
+        if hasattr(t, "cpu"):
+            t = t.cpu()
+        return np.asarray(t)
 
     while not done and step < args.max_steps:
         sd = obs["sensor_data"]
-
-        def _np(t):
-            if hasattr(t, "cpu"):
-                t = t.cpu()
-            return np.asarray(t)
 
         front = _np(sd["base_camera"]["rgb"]).astype(np.uint8)
         if front.ndim == 4:
@@ -107,6 +108,16 @@ for ep in range(args.num_episodes):
         gripper = np.array([qpos[-2:].mean()], dtype=np.float32)
         state = np.concatenate([tcp, gripper])  # (8,) — TensorImagesToNumpy truncates to 7
 
+        # Collect environment state metrics
+        tcp_pos = tcp[:3]
+        try:
+            cube_pos = _np(env_u.cube.pose.p).reshape(-1)[:3]
+            tcp_cube_dist = float(np.linalg.norm(tcp_pos - cube_pos))
+        except Exception:
+            cube_pos = np.zeros(3)
+            tcp_cube_dist = -1.0
+        is_grasped = bool(_np(obs["extra"].get("is_grasped", False)).flat[0])
+
         policy_obs = {
             "image": {"front": front, "wrist": wrist},
             "state": state,
@@ -122,7 +133,7 @@ for ep in range(args.num_episodes):
 
         # Execute 4 actions per inference call (action chunking)
         for action in actions[:4]:
-            obs, _, terminated, truncated, info = env.step(action)
+            obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
 
             frame = env.render()
@@ -136,10 +147,35 @@ for ep in range(args.num_episodes):
             if done:
                 break
 
+        # Log per-step metrics (log every 4 steps = once per inference)
+        ep_log.append({
+            "step": step,
+            "tcp_x": float(tcp_pos[0]),
+            "tcp_y": float(tcp_pos[1]),
+            "tcp_z": float(tcp_pos[2]),
+            "cube_x": float(cube_pos[0]),
+            "cube_y": float(cube_pos[1]),
+            "cube_z": float(cube_pos[2]),
+            "tcp_cube_dist": tcp_cube_dist,
+            "gripper_width": float(gripper[0]),
+            "is_grasped": int(is_grasped),
+            "action_x": float(actions[0, 0]),
+            "action_y": float(actions[0, 1]),
+            "action_z": float(actions[0, 2]),
+            "action_grip": float(actions[0, 6]),
+            "reward": float(reward) if reward is not None else 0.0,
+            "success": int(bool(info.get("success", False))),
+        })
+
     success = bool(info.get("success", False))
     if success:
         successes += 1
-    print(f"  ep {ep+1}/{args.num_episodes}: {'SUCCESS' if success else 'FAIL'} ({step} steps)")
+    print(f"  ep {ep+1}/{args.num_episodes}: {'SUCCESS' if success else 'FAIL'} ({step} steps) | dist={tcp_cube_dist:.4f}")
+
+    # Log per-step metrics to wandb for this episode (first 3 episodes only)
+    if ep <= 2 and ep_log:
+        for row in ep_log:
+            wandb.log({f"rollout/ep{ep}/{k}": v for k, v in row.items()})
 
     if ep_frames:
         all_frames.append(ep_frames)
@@ -149,7 +185,11 @@ env.close()
 success_rate = successes / args.num_episodes
 print(f"[eval] Success rate: {success_rate:.2f} ({successes}/{args.num_episodes})")
 
-log_dict = {"eval/success_rate": success_rate, "eval/num_episodes": args.num_episodes}
+log_dict = {
+    "eval/success_rate": success_rate,
+    "eval/num_episodes": args.num_episodes,
+    "eval/num_successes": successes,
+}
 os.makedirs("/workspace/output/eval_videos", exist_ok=True)
 for ep_idx, frames in enumerate(all_frames[:5]):
     if len(frames) < 2:

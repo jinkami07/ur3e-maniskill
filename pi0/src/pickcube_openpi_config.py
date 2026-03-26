@@ -30,6 +30,7 @@ from openpi.training.config import (
     DataConfigFactory,
     ModelTransformFactory,
 )
+from openpi.training import optimizer as _optimizer
 
 
 @dataclasses.dataclass(frozen=True)
@@ -167,9 +168,11 @@ class PickCubeDataConfig(DataConfigFactory):
 
 # ── Register config ───────────────────────────────────────────────────────────
 
+_NUM_TRAIN_STEPS = 300_000
+
 _PICKCUBE_CONFIG = _cfg.TrainConfig(
     name="pi0_pickcube_lora",
-    exp_name="lora_ft_v4",
+    exp_name="lora_ft_v5",
     # LoRA fine-tuning of pi0 base
     model=pi0_config.Pi0Config(
         paligemma_variant="gemma_2b_lora",
@@ -187,23 +190,31 @@ _PICKCUBE_CONFIG = _cfg.TrainConfig(
     # Load pretrained weights; skip action layers with different action_dim/horizon
     weight_loader=PartialCheckpointWeightLoader(PRETRAINED_PARAMS),
     # LoRA freeze: only train LoRA adapters
+    # (action_in_proj / action_out_proj / state_proj are top-level → trainable)
     freeze_filter=pi0_config.Pi0Config(
         paligemma_variant="gemma_2b_lora",
         action_expert_variant="gemma_300m_lora",
     ).get_freeze_filter(),
+    # Fix: decay_steps must match num_train_steps; peak_lr 2x default for faster convergence
+    lr_schedule=_optimizer.CosineDecaySchedule(
+        warmup_steps=2_000,
+        peak_lr=5e-5,
+        decay_steps=_NUM_TRAIN_STEPS,
+        decay_lr=5e-7,
+    ),
     ema_decay=None,            # off for LoRA
-    num_train_steps=100_000,
+    num_train_steps=_NUM_TRAIN_STEPS,
     batch_size=1,              # L4 24GB
-    log_interval=50,
-    save_interval=25_000,
-    keep_period=25_000,
+    log_interval=100,
+    save_interval=50_000,
+    keep_period=None,          # max_to_keep=1: keep only latest checkpoint
     checkpoint_base_dir=CHECKPOINT_BASE,
     assets_base_dir=ASSETS_LOCAL_PATH,
     project_name="ur3e-pickcube",
     wandb_enabled=True,
     seed=42,
-    resume=False,
-    overwrite=True,
+    resume=True,
+    overwrite=False,
 )
 
 

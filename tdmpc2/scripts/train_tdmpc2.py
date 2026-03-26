@@ -17,6 +17,8 @@ import sys
 import time
 from pathlib import Path
 
+import collections
+
 import numpy as np
 import torch
 import yaml
@@ -295,12 +297,19 @@ def _flatten_single(obs):
 def evaluate(step: int) -> float:
     agent.eval()
     successes = 0
+    ep_rewards_list = []
+    ep_lengths = []
+    ep_is_grasped = []
+    ep_tcp_cube_dists = []
+
     for ep in range(EVAL_EPS):
         obs, _ = eval_env.reset(seed=9000 + ep)
         done = False
         t = 0
+        ep_reward = 0.0
         while not done and t < cfg["episode_length"]:
-            o = torch.FloatTensor(_flatten_single(obs)).unsqueeze(0).to(DEVICE)
+            flat_obs = _flatten_single(obs)
+            o = torch.FloatTensor(flat_obs).unsqueeze(0).to(DEVICE)
             with torch.no_grad():
                 if _USE_OFFICIAL:
                     a = agent.act(o, t0=(t == 0), eval_mode=True).cpu().numpy().reshape(-1)
@@ -308,14 +317,48 @@ def evaluate(step: int) -> float:
                     z = agent.encode(o)
                     a, _ = agent.pi(z)
                     a = a.cpu().numpy().reshape(-1)
-            obs, _, terminated, truncated, info = eval_env.step(a)
+            obs, reward, terminated, truncated, info = eval_env.step(a)
+            ep_reward += float(reward)
             done = terminated or truncated
             t += 1
+
+        # obs layout: qpos(8), qvel(8), tcp(7), cube_pos(3), cube_quat(4), goal_pos(3), grasped(1)
+        flat_final = _flatten_single(obs)
+        tcp_pos  = flat_final[16:19]
+        cube_pos = flat_final[23:26]
+        tcp_cube_dist = float(np.linalg.norm(tcp_pos - cube_pos))
+
         successes += float(info.get("success", False))
+        ep_rewards_list.append(ep_reward)
+        ep_lengths.append(t)
+        ep_is_grasped.append(float(info.get("is_grasped", False)))
+        ep_tcp_cube_dists.append(tcp_cube_dist)
 
     rate = successes / EVAL_EPS
-    print(f"[eval] step={step:>7d}  success_rate={rate:.2f}  ({int(successes)}/{EVAL_EPS})")
-    wandb.log({"eval/success_rate": rate}, step=step)
+    mean_reward = float(np.mean(ep_rewards_list))
+    mean_length = float(np.mean(ep_lengths))
+    mean_is_grasped = float(np.mean(ep_is_grasped))
+    mean_tcp_cube_dist = float(np.mean(ep_tcp_cube_dists))
+
+    print(f"[eval] step={step:>7d}  success_rate={rate:.2f}  ({int(successes)}/{EVAL_EPS})"
+          f"  mean_reward={mean_reward:.3f}  mean_dist={mean_tcp_cube_dist:.4f}")
+
+    log = {
+        "eval/success_rate":       rate,
+        "eval/mean_reward":        mean_reward,
+        "eval/mean_episode_length": mean_length,
+        "eval/mean_is_grasped":    mean_is_grasped,
+        "eval/mean_tcp_cube_dist": mean_tcp_cube_dist,
+        "eval/num_successes":      int(successes),
+    }
+    # Per-episode detail (first 5 episodes)
+    for ep_i, (r, l, g, d) in enumerate(zip(
+            ep_rewards_list[:5], ep_lengths[:5], ep_is_grasped[:5], ep_tcp_cube_dists[:5])):
+        log[f"eval/ep{ep_i}_reward"]        = r
+        log[f"eval/ep{ep_i}_length"]        = l
+        log[f"eval/ep{ep_i}_is_grasped"]    = g
+        log[f"eval/ep{ep_i}_tcp_cube_dist"] = d
+    wandb.log(log, step=step)
     agent.train()
     return rate
 
@@ -327,6 +370,8 @@ obs_arr, _ = vec_env.reset(seed=0)
 obs_arr = _flatten(obs_arr)
 ep_rewards = np.zeros(NUM_ENVS)
 global_step = 0
+num_episodes = 0
+reward_history = collections.deque(maxlen=100)  # rolling mean over last 100 episodes
 t0 = time.time()
 
 while global_step < STEPS:
@@ -359,8 +404,17 @@ while global_step < STEPS:
     # リセット (done 環境)
     if np.any(dones):
         done_idx = np.where(dones)[0]
+        for idx in done_idx:
+            reward_history.append(float(ep_rewards[idx]))
+            num_episodes += 1
         mean_r = ep_rewards[done_idx].mean()
-        wandb.log({"train/episode_reward": mean_r, "train/step": global_step}, step=global_step)
+        mean_r_100 = float(np.mean(reward_history)) if reward_history else 0.0
+        wandb.log({
+            "train/episode_reward":    float(mean_r),
+            "train/mean_reward_100ep": mean_r_100,
+            "train/num_episodes":      num_episodes,
+            "train/step":              global_step,
+        }, step=global_step)
         ep_rewards[done_idx] = 0
 
     # ── 学習ステップ ──────────────────────────────────────────────────────────
@@ -368,7 +422,10 @@ while global_step < STEPS:
         if _USE_OFFICIAL:
             metrics = agent.update(buffer)
             if global_step % 1000 == 0:
-                wandb.log({f"train/{k}": v for k, v in metrics.items()}, step=global_step)
+                train_log = {f"train/{k}": v for k, v in metrics.items()}
+                train_log["train/buffer_size"] = buffer.size
+                train_log["train/sps"]         = global_step / (time.time() - t0)
+                wandb.log(train_log, step=global_step)
         else:
             # シンプル SAC 風更新
             obs_b, act_b, rew_b, next_b, done_b = buffer.sample(BATCH_SIZE)
@@ -402,9 +459,12 @@ while global_step < STEPS:
 
             if global_step % 1000 == 0:
                 wandb.log({
-                    "train/q_loss": q_loss.item(),
-                    "train/pi_loss": pi_loss.item(),
-                    "train/alpha": log_alpha.exp().item(),
+                    "train/q_loss":      q_loss.item(),
+                    "train/pi_loss":     pi_loss.item(),
+                    "train/alpha":       log_alpha.exp().item(),
+                    "train/alpha_loss":  alpha_loss.item(),
+                    "train/buffer_size": buffer.size,
+                    "train/sps":         global_step / (time.time() - t0),
                 }, step=global_step)
 
     # ── 評価 ────────────────────────────────────────────────────────────────
@@ -417,11 +477,19 @@ while global_step < STEPS:
         torch.save({"step": global_step, "model": agent.state_dict()}, ckpt)
         print(f"[tdmpc2] Saved checkpoint: {ckpt}")
 
-    # ── ログ (テキスト) ───────────────────────────────────────────────────────
+    # ── 定期ログ (テキスト + wandb) ────────────────────────────────────────────
     if global_step % 10_000 < NUM_ENVS:
         elapsed = time.time() - t0
         sps = global_step / elapsed
-        print(f"[tdmpc2] step={global_step:>7d}  sps={sps:.0f}  buffer={buffer.size}")
+        mean_r_100 = float(np.mean(reward_history)) if reward_history else 0.0
+        print(f"[tdmpc2] step={global_step:>7d}  sps={sps:.0f}  buffer={buffer.size}"
+              f"  episodes={num_episodes}  mean_r100={mean_r_100:.3f}")
+        wandb.log({
+            "train/sps":               sps,
+            "train/buffer_size":       buffer.size,
+            "train/num_episodes":      num_episodes,
+            "train/mean_reward_100ep": mean_r_100,
+        }, step=global_step)
 
 vec_env.close()
 eval_env.close()
